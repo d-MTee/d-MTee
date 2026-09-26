@@ -93,3 +93,40 @@ test("route graph prefers lower-fee and lower-impact quotes", async () => {
   const route = await graph.best("SOL", "USDC", 1000, 50);
   assert.equal(route.expectedOutput, 1050);
 });
+
+test("route graph penalizes stale quotes even when raw output is larger", async () => {
+  const now = Date.now();
+  const graph = new RouteGraph([
+    {
+      venue: "SIM",
+      quote: async () => ({
+        venue: "SIM",
+        inputMint: "SOL",
+        outputMint: "USDC",
+        inAmount: 1000,
+        outAmount: 1100,
+        feeBps: 8,
+        priceImpactBps: 15,
+        latencyMs: 80,
+        timestamp: now - 60000,
+      }),
+    },
+    {
+      venue: "SIM",
+      quote: async () => ({
+        venue: "SIM",
+        inputMint: "SOL",
+        outputMint: "USDC",
+        inAmount: 1000,
+        outAmount: 1000,
+        feeBps: 6,
+        priceImpactBps: 10,
+        latencyMs: 10,
+        timestamp: now,
+      }),
+    },
+  ]);
+
+  const route = await graph.best("SOL", "USDC", 1000, 50);
+  assert.equal(route.expectedOutput, 1000);
+});

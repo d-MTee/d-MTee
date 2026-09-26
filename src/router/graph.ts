@@ -91,6 +91,16 @@ export class RouteGraph {
     const priorityFeeLamports = 5000;
     const feeCost = (amount * q.feeBps) / 10000;
     const impactPenalty = q.priceImpactBps * 10;
+    const latencyPenalty = Math.max(0, (q.latencyMs ?? 0) - 25) * 0.25;
+    const freshnessMs = Date.now() - (q.timestamp ?? Date.now());
+    const stalePenalty = freshnessMs > 5000 ? (freshnessMs - 5000) * 0.01 : 0;
+    const adjustedOutput = Math.max(0, q.outAmount - feeCost - impactPenalty - latencyPenalty - stalePenalty);
+
+    let reason: Route["decision"] extends infer T ? T["reason"] : never = "best";
+    if (stalePenalty > 0) reason = "stale";
+    else if (q.latencyMs > 50) reason = "latency";
+    else if (q.feeBps > 20) reason = "fee";
+    else if (q.priceImpactBps > 50) reason = "impact";
 
     return {
       legs: [leg],
@@ -100,8 +110,14 @@ export class RouteGraph {
       priceImpactBps: q.priceImpactBps,
       slippageBps: maxSlippageBps,
       priorityFeeLamports,
-      score: q.outAmount - feeCost - impactPenalty,
+      score: adjustedOutput,
       expiresAt: Date.now() + 1500,
+      decision: {
+        reason,
+        adjustedOutput,
+        freshnessMs,
+        valid: freshnessMs <= 60000,
+      },
     };
   }
 }

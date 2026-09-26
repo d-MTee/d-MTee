@@ -25,6 +25,13 @@ export interface Leg {
   feeBps: number;
   priceImpactBps: number;
 }
+export interface RouteDecision {
+  reason: "best" | "latency" | "fee" | "impact" | "stale" | "risk";
+  adjustedOutput: number;
+  freshnessMs: number;
+  valid: boolean;
+}
+
 export interface Route {
   legs: Leg[];
   inputAmount: number;
@@ -35,6 +42,7 @@ export interface Route {
   priorityFeeLamports: number;
   score: number;
   expiresAt: number;
+  decision?: RouteDecision;
 }
 export interface Order {
   id: string;
