@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
-use crate::mpc_proto::mpc::v1::participant_signer_server::ParticipantSigner;
-use crate::mpc_proto::mpc::v1::{
+use crate::mpc_proto::participant_signer_server::ParticipantSigner;
+use crate::mpc_proto::{
     CreateSigningSessionRequest, CreateSigningSessionResponse, DkgRound1Request, DkgRound1Response,
     DkgRound2Request, DkgRound2Response, FinalizeSessionRequest, FinalizeSessionResponse,
     GetSessionStatusRequest, GetSessionStatusResponse, RegisterParticipantRequest,
@@ -101,7 +101,7 @@ impl ParticipantSigner for GrpcServer {
         }))
     }
 
-    async fn dkg_round_1(
+    async fn dkg_round1(
         &self,
         request: Request<DkgRound1Request>,
     ) -> Result<Response<DkgRound1Response>, Status> {
@@ -117,7 +117,7 @@ impl ParticipantSigner for GrpcServer {
         }))
     }
 
-    async fn dkg_round_2(
+    async fn dkg_round2(
         &self,
         request: Request<DkgRound2Request>,
     ) -> Result<Response<DkgRound2Response>, Status> {
@@ -133,7 +133,7 @@ impl ParticipantSigner for GrpcServer {
         }))
     }
 
-    async fn sign_round_1(
+    async fn sign_round1(
         &self,
         request: Request<SignRound1Request>,
     ) -> Result<Response<SignRound1Response>, Status> {
@@ -149,7 +149,7 @@ impl ParticipantSigner for GrpcServer {
         }))
     }
 
-    async fn sign_round_2(
+    async fn sign_round2(
         &self,
         request: Request<SignRound2Request>,
     ) -> Result<Response<SignRound2Response>, Status> {

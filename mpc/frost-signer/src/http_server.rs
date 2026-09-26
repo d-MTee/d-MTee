@@ -171,13 +171,13 @@ impl ParticipantHttpServer {
         let body = &buffer[body_start..body_start + content_length.min(bytes_read - body_start)];
 
         let response_body = self.dispatch(&path, body)?;
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            response_body.len(),
-            response_body
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response_body.len()
         );
 
-        stream.write_all(response.as_bytes())?;
+        stream.write_all(headers.as_bytes())?;
+        stream.write_all(&response_body)?;
         stream.flush()?;
         Ok(())
     }

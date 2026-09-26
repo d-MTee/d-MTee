@@ -12,6 +12,7 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <os.detected.classifier>windows-x86_64</os.detected.classifier>
     </properties>
 
     <dependencies>
@@ -33,7 +34,7 @@
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
-            <version>4.27.2</version>
+            <version>4.36.0</version>
         </dependency>
         <dependency>
             <groupId>javax.annotation</groupId>
@@ -45,16 +46,11 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>kr.motd.maven.plugins</groupId>
-                <artifactId>os-maven-plugin</artifactId>
-                <version>1.7.1</version>
-            </plugin>
-            <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>
                 <version>0.6.1</version>
                 <configuration>
-                    <protocArtifact>com.google.protobuf:protoc:4.27.2:exe:${os.detected.classifier}</protocArtifact>
+                    <protocArtifact>com.google.protobuf:protoc:4.36.0:exe:${os.detected.classifier}</protocArtifact>
                     <pluginId>grpc-java</pluginId>
                     <pluginArtifact>io.grpc:protoc-gen-grpc-java:1.64.0:exe:${os.detected.classifier}</pluginArtifact>
                     <protoSourceRoot>${project.basedir}/../mpc/proto</protoSourceRoot>

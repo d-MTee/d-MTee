@@ -5,7 +5,8 @@ pub mod mpc_proto {
     include!(concat!(env!("OUT_DIR"), "/mpc.v1.rs"));
 }
 
-use base64;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use frost_ed25519 as frost;
 use rand::rngs::OsRng;
 use serde::Serialize;
@@ -67,7 +68,7 @@ Notes:
 
 fn parse_message(raw: Option<String>) -> Vec<u8> {
     match raw {
-        Some(value) => match base64::decode(&value) {
+        Some(value) => match BASE64.decode(&value) {
             Ok(decoded) => decoded,
             Err(_) => value.into_bytes(),
         },
@@ -202,7 +203,7 @@ fn sign_2_of_3(
     let sig = frost::aggregate(&package, &shares, public)?;
     public.verifying_key().verify(message, &sig)?;
 
-    Ok(sig.serialize().to_vec())
+    Ok(sig.serialize()?)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -221,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string_pretty(&DemoResult {
                     threshold: 2,
                     participants: 3,
-                    public_key: hex::encode(public.verifying_key().serialize()),
+                    public_key: hex::encode(public.verifying_key().serialize()?),
                     message: String::from_utf8_lossy(&msg_bytes).into_owned(),
                     signature: hex::encode(sig),
                     verified: true,
