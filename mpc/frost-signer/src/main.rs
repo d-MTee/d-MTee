@@ -6,6 +6,20 @@ use std::collections::BTreeMap;
 use std::env;
 
 const DEFAULT_DEMO_MESSAGE: &str = "mini-dflow real MPC proof";
+const DEFAULT_PARTICIPANT_ID: &str = "p1";
+const DEFAULT_PARTICIPANT_HOST: &str = "127.0.0.1";
+const DEFAULT_PARTICIPANT_PORT: u16 = 9001;
+
+#[derive(Serialize)]
+struct ParticipantRuntimeStatus {
+    status: String,
+    participant_id: String,
+    host: String,
+    port: u16,
+    threshold: u16,
+    total_participants: u16,
+    ready: bool,
+}
 
 #[derive(Serialize)]
 struct DemoResult {
@@ -19,15 +33,24 @@ struct DemoResult {
 
 fn print_usage() {
     eprintln!(
-        "Usage: {} [demo|help] [message]
+        "Usage: {} [demo|participant|help] [options]
 
 Commands:
-  demo [message]   Run a local 2-of-3 FROST DKG and signing flow.
-  help             Show this help text.
+  demo [message]                  Run a local 2-of-3 FROST DKG and signing flow.
+  participant                     Start a single participant runtime for distributed MPC.
+  help                            Show this help text.
+
+Participant options:
+  --participant-id <id>   Identity for this signer process (default: p1)
+  --host <host>           Host or bind address (default: 127.0.0.1)
+  --port <port>           Listener port (default: 9001)
+  --threshold <n>         Required signing threshold (default: 2)
+  --total <n>            Total participant count (default: 3)
 
 Notes:
   - Message is optional and defaults to a demo payload.
   - Base64-encoded values are accepted for signed payloads.
+  - The participant mode represents the next step toward independent signer processes.
 ",
         env::args().next().unwrap_or_else(|| "dflow-frost-signer".to_string())
     );
@@ -41,6 +64,55 @@ fn parse_message(raw: Option<String>) -> Vec<u8> {
         },
         None => DEFAULT_DEMO_MESSAGE.as_bytes().to_vec(),
     }
+}
+
+fn parse_optional_u16(value: Option<String>, fallback: u16) -> Result<u16, Box<dyn std::error::Error>> {
+    match value {
+        Some(raw) => Ok(raw.parse::<u16>()?),
+        None => Ok(fallback),
+    }
+}
+
+fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut participant_id = DEFAULT_PARTICIPANT_ID.to_string();
+    let mut host = DEFAULT_PARTICIPANT_HOST.to_string();
+    let mut port = DEFAULT_PARTICIPANT_PORT;
+    let mut threshold = 2u16;
+    let mut total_participants = 3u16;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--participant-id" => participant_id = args.next().unwrap_or_else(|| participant_id.clone()),
+            "--host" => host = args.next().unwrap_or_else(|| host.clone()),
+            "--port" => port = parse_optional_u16(args.next(), port)?,
+            "--threshold" => threshold = parse_optional_u16(args.next(), threshold)?,
+            "--total" => total_participants = parse_optional_u16(args.next(), total_participants)?,
+            "--help" | "-h" => {
+                print_usage();
+                return Ok(());
+            }
+            _ => {
+                if !arg.is_empty() {
+                    eprintln!("ignoring unknown participant option: {arg}");
+                }
+            }
+        }
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&ParticipantRuntimeStatus {
+            status: "participant-ready".to_string(),
+            participant_id,
+            host,
+            port,
+            threshold,
+            total_participants,
+            ready: true,
+        })?
+    );
+
+    Ok(())
 }
 
 fn dkg_2_of_3() -> Result<(BTreeMap<frost::Identifier, frost::keys::KeyPackage>, frost::keys::PublicKeyPackage), Box<dyn std::error::Error>> {
@@ -145,10 +217,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })?
             );
         }
+        "participant" => {
+            run_participant_mode(&mut args)?;
+        }
         "help" | "-h" | "--help" => print_usage(),
         _ => {
             print_usage();
-            return Err(format!("unknown command: {command}. Expected one of: demo, help").into());
+            return Err(format!("unknown command: {command}. Expected one of: demo, participant, help").into());
         }
     }
 
