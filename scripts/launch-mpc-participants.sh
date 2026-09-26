@@ -20,8 +20,9 @@ case "$COMMAND" in
     for i in $(seq 1 "$TOTAL"); do
       participant_id="p${i}"
       port=$((PORT_BASE + i - 1))
-      echo "[mpc] starting ${participant_id} on ${HOST}:${port}"
-      "$BIN" participant --participant-id "$participant_id" --host "$HOST" --port "$port" --threshold "$THRESHOLD" --total "$TOTAL" &
+      grpc_port=$((port + 1000))
+      echo "[mpc] starting ${participant_id} on ${HOST}:${port} (gRPC ${HOST}:${grpc_port})"
+      "$BIN" participant --participant-id "$participant_id" --host "$HOST" --port "$port" --grpc-port "$grpc_port" --threshold "$THRESHOLD" --total "$TOTAL" &
       PIDS+=("$!")
       sleep 0.2
     done

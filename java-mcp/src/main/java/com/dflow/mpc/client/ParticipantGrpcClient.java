@@ -1,6 +1,10 @@
 package com.dflow.mpc.client;
 
 import com.dflow.mpc.protocol.MpcProtocol;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import mpc.v1.MpcService;
+import mpc.v1.ParticipantSignerGrpc;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -9,6 +13,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 
 public class ParticipantGrpcClient {
@@ -20,6 +25,10 @@ public class ParticipantGrpcClient {
         this.participantId = participantId;
         this.host = host;
         this.port = port;
+    }
+
+    private int grpcPort() {
+        return port + 1000;
     }
 
     private static byte[] stripHttpHeaders(byte[] raw) {
@@ -37,7 +46,7 @@ public class ParticipantGrpcClient {
         return raw;
     }
 
-    private Map<String, Object> exchange(String route, String sessionId, byte[] payload) {
+    private Map<String, Object> exchangeHttp(String route, String sessionId, byte[] payload) {
         try {
             String target = "http://" + host + ":" + port + "/" + route;
             byte[] requestBody = MpcProtocol.encodeEnvelope(route, sessionId, participantId, payload);
@@ -63,6 +72,109 @@ public class ParticipantGrpcClient {
             }
         } catch (IOException e) {
             throw new RuntimeException("participant exchange failed for " + participantId + " on " + host + ":" + port + " route=" + route, e);
+        }
+    }
+
+    private Map<String, Object> exchangeGrpc(String route, String sessionId, byte[] payload) {
+        ManagedChannel channel = ManagedChannelBuilder.forAddress(host, grpcPort()).usePlaintext().build();
+        try {
+            ParticipantSignerGrpc.ParticipantSignerBlockingStub stub = ParticipantSignerGrpc.newBlockingStub(channel);
+            Map<String, Object> result = new HashMap<>();
+
+            switch (route) {
+                case "register" -> {
+                    MpcService.RegisterParticipantResponse response = stub.registerParticipant(
+                        MpcService.RegisterParticipantRequest.newBuilder()
+                            .setParticipantId(participantId)
+                            .setHost(host)
+                            .setRole("participant")
+                            .build());
+                    result.put("route", route);
+                    result.put("sessionId", sessionId);
+                    result.put("participantId", participantId);
+                    result.put("ok", response.getOk());
+                    result.put("status", response.getStatus());
+                    return result;
+                }
+                case "dkg/round1" -> {
+                    MpcService.DkgRound1Response response = stub.dkgRound1(
+                        MpcService.DkgRound1Request.newBuilder()
+                            .setSessionId(sessionId)
+                            .setParticipantId(participantId)
+                            .setRequestId(sessionId)
+                            .build());
+                    result.put("route", route);
+                    result.put("sessionId", sessionId);
+                    result.put("participantId", participantId);
+                    result.put("ok", response.getOk());
+                    result.put("status", response.getParticipantId());
+                    result.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response.getRound1Package().toByteArray()));
+                    return result;
+                }
+                case "dkg/round2" -> {
+                    MpcService.DkgRound2Response response = stub.dkgRound2(
+                        MpcService.DkgRound2Request.newBuilder()
+                            .setSessionId(sessionId)
+                            .setParticipantId(participantId)
+                            .setRound1Secret(com.google.protobuf.ByteString.copyFrom(payload))
+                            .addRound1Packages(com.google.protobuf.ByteString.copyFrom(payload))
+                            .build());
+                    result.put("route", route);
+                    result.put("sessionId", sessionId);
+                    result.put("participantId", participantId);
+                    result.put("ok", response.getOk());
+                    result.put("status", response.getParticipantId());
+                    result.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response.getRound2Package().toByteArray()));
+                    return result;
+                }
+                case "sign/round1" -> {
+                    MpcService.SignRound1Response response = stub.signRound1(
+                        MpcService.SignRound1Request.newBuilder()
+                            .setSessionId(sessionId)
+                            .setParticipantId(participantId)
+                            .setMessage(com.google.protobuf.ByteString.copyFrom(payload))
+                            .build());
+                    result.put("route", route);
+                    result.put("sessionId", sessionId);
+                    result.put("participantId", participantId);
+                    result.put("ok", response.getOk());
+                    result.put("status", response.getParticipantId());
+                    result.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response.getCommitment().toByteArray()));
+                    return result;
+                }
+                case "sign/round2" -> {
+                    MpcService.SignRound2Response response = stub.signRound2(
+                        MpcService.SignRound2Request.newBuilder()
+                            .setSessionId(sessionId)
+                            .setParticipantId(participantId)
+                            .setSigningPackage(com.google.protobuf.ByteString.copyFrom(payload))
+                            .setNonce(com.google.protobuf.ByteString.copyFrom(payload))
+                            .setSigningKey(com.google.protobuf.ByteString.copyFrom(payload))
+                            .build());
+                    result.put("route", route);
+                    result.put("sessionId", sessionId);
+                    result.put("participantId", participantId);
+                    result.put("ok", response.getOk());
+                    result.put("status", response.getParticipantId());
+                    result.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response.getSignatureShare().toByteArray()));
+                    return result;
+                }
+                default -> {
+                    throw new IllegalArgumentException("unsupported gRPC route: " + route);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("gRPC participant exchange failed for " + participantId + " on " + host + ":" + grpcPort() + " route=" + route, e);
+        } finally {
+            channel.shutdownNow();
+        }
+    }
+
+    private Map<String, Object> exchange(String route, String sessionId, byte[] payload) {
+        try {
+            return exchangeGrpc(route, sessionId, payload);
+        } catch (RuntimeException grpcError) {
+            return exchangeHttp(route, sessionId, payload);
         }
     }
 
