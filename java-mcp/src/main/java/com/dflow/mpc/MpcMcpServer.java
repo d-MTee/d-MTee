@@ -63,19 +63,24 @@ public class MpcMcpServer {
 
     public List<Map<String, Object>> simulateRoundSequence(String sessionId) {
         List<Map<String, Object>> results = new ArrayList<>();
-        results.add(registerParticipant(sessionId, "p1", "127.0.0.1", 9001));
-        results.add(registerParticipant(sessionId, "p2", "127.0.0.1", 9002));
-        results.add(registerParticipant(sessionId, "p3", "127.0.0.1", 9003));
-        results.add(relayDkgRound1(sessionId, "p1", "127.0.0.1", 9001));
-        results.add(relayDkgRound1(sessionId, "p2", "127.0.0.1", 9002));
-        results.add(relayDkgRound1(sessionId, "p3", "127.0.0.1", 9003));
-        results.add(relayDkgRound2(sessionId, "p1", "127.0.0.1", 9001, new byte[] {1}, new byte[] {2, 3}));
-        results.add(relayDkgRound2(sessionId, "p2", "127.0.0.1", 9002, new byte[] {4}, new byte[] {5, 6}));
-        results.add(relayDkgRound2(sessionId, "p3", "127.0.0.1", 9003, new byte[] {7}, new byte[] {8, 9}));
-        results.add(relaySignRound1(sessionId, "p1", "127.0.0.1", 9001, "demo-message".getBytes()));
-        results.add(relaySignRound1(sessionId, "p2", "127.0.0.1", 9002, "demo-message".getBytes()));
-        results.add(relaySignRound2(sessionId, "p1", "127.0.0.1", 9001, new byte[] {10}, new byte[] {11}, new byte[] {12}));
-        results.add(relaySignRound2(sessionId, "p2", "127.0.0.1", 9002, new byte[] {13}, new byte[] {14}, new byte[] {15}));
+
+        String[] participantIds = {"p1", "p2", "p3"};
+        int[] ports = {9001, 9002, 9003};
+
+        for (int i = 0; i < participantIds.length; i++) {
+            results.add(registerParticipant(sessionId, participantIds[i], "127.0.0.1", ports[i]));
+            results.add(relayDkgRound1(sessionId, participantIds[i], "127.0.0.1", ports[i]));
+            results.add(relayDkgRound2(sessionId, participantIds[i], "127.0.0.1", ports[i],
+                (participantIds[i] + ":dkg-secret").getBytes(),
+                (participantIds[i] + ":peer-package").getBytes()));
+            results.add(relaySignRound1(sessionId, participantIds[i], "127.0.0.1", ports[i],
+                "demo-message".getBytes()));
+            results.add(relaySignRound2(sessionId, participantIds[i], "127.0.0.1", ports[i],
+                (participantIds[i] + ":signing-package").getBytes(),
+                (participantIds[i] + ":nonce").getBytes(),
+                (participantIds[i] + ":key-package").getBytes()));
+        }
+
         return results;
     }
 
