@@ -13,12 +13,14 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
 
+use crate::grpc_server::GrpcServer;
 use http_server::ParticipantHttpServer;
 
 const DEFAULT_DEMO_MESSAGE: &str = "mini-dflow real MPC proof";
 const DEFAULT_PARTICIPANT_ID: &str = "p1";
 const DEFAULT_PARTICIPANT_HOST: &str = "127.0.0.1";
 const DEFAULT_PARTICIPANT_PORT: u16 = 9001;
+const DEFAULT_GRPC_PORT_OFFSET: u16 = 1000;
 
 #[derive(Serialize)]
 struct ParticipantRuntimeStatus {
@@ -53,7 +55,8 @@ Commands:
 Participant options:
   --participant-id <id>   Identity for this signer process (default: p1)
   --host <host>           Host or bind address (default: 127.0.0.1)
-  --port <port>           Listener port (default: 9001)
+  --port <port>           HTTP listener port (default: 9001)
+  --grpc-port <port>      gRPC listener port (default: HTTP port + 1000)
   --threshold <n>         Required signing threshold (default: 2)
   --total <n>            Total participant count (default: 3)
 
@@ -87,6 +90,7 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
     let mut participant_id = DEFAULT_PARTICIPANT_ID.to_string();
     let mut host = DEFAULT_PARTICIPANT_HOST.to_string();
     let mut port = DEFAULT_PARTICIPANT_PORT;
+    let mut grpc_port = port.saturating_add(DEFAULT_GRPC_PORT_OFFSET);
     let mut threshold = 2u16;
     let mut total_participants = 3u16;
 
@@ -94,7 +98,11 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         match arg.as_str() {
             "--participant-id" => participant_id = args.next().unwrap_or_else(|| participant_id.clone()),
             "--host" => host = args.next().unwrap_or_else(|| host.clone()),
-            "--port" => port = parse_optional_u16(args.next(), port)?,
+            "--port" => {
+                port = parse_optional_u16(args.next(), port)?;
+                grpc_port = port.saturating_add(DEFAULT_GRPC_PORT_OFFSET);
+            }
+            "--grpc-port" => grpc_port = parse_optional_u16(args.next(), grpc_port)?,
             "--threshold" => threshold = parse_optional_u16(args.next(), threshold)?,
             "--total" => total_participants = parse_optional_u16(args.next(), total_participants)?,
             "--help" | "-h" => {
@@ -109,7 +117,8 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         }
     }
 
-    let server = ParticipantHttpServer::new(&participant_id, &host, port, threshold, total_participants);
+    let http_server = ParticipantHttpServer::new(&participant_id, &host, port, threshold, total_participants);
+    let grpc_server = GrpcServer::new(&participant_id, &host, grpc_port);
     println!(
         "{}",
         serde_json::to_string_pretty(&ParticipantRuntimeStatus {
@@ -123,7 +132,21 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         })?
     );
 
-    server.start()?;
+    let http_server = std::thread::spawn(move || {
+        if let Err(err) = http_server.start() {
+            eprintln!("[http] participant server failed: {err}");
+        }
+    });
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    let grpc_addr: std::net::SocketAddr = format!("{}:{}", host, grpc_port).parse()?;
+    runtime.block_on(async move {
+        if let Err(err) = grpc_server.serve(grpc_addr).await {
+            eprintln!("[grpc] participant server failed: {err}");
+        }
+    });
+
+    let _ = http_server.join();
     Ok(())
 }
 

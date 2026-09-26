@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
-use crate::mpc_proto::participant_signer_server::ParticipantSigner;
+use crate::mpc_proto::participant_signer_server::{ParticipantSigner, ParticipantSignerServer};
 use crate::mpc_proto::{
     CreateSigningSessionRequest, CreateSigningSessionResponse, DkgRound1Request, DkgRound1Response,
     DkgRound2Request, DkgRound2Response, FinalizeSessionRequest, FinalizeSessionResponse,
@@ -69,6 +69,13 @@ impl GrpcServer {
             self.port,
             sessions.len()
         )
+    }
+
+    pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
+        tonic::transport::Server::builder()
+            .add_service(ParticipantSignerServer::new(self))
+            .serve(addr)
+            .await
     }
 }
 
