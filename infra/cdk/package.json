@@ -1,0 +1,21 @@
+{
+  "name": "mini-dflow-infra",
+  "version": "5.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.232.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.232.0",
+    "typescript": "^5.9.2",
+    "ts-node": "^10.9.2",
+    "@types/node": "^24.5.2"
+  }
+}

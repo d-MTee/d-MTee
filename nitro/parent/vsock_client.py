@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+import base64, json, os, socket, sys
+cid=int(os.environ.get('NITRO_ENCLAVE_CID','16'))
+port=int(os.environ.get('NITRO_VSOCK_PORT','5000'))
+op=sys.argv[1]
+payload=sys.argv[2] if len(sys.argv)>2 else ''
+s=socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+s.connect((cid,port))
+s.sendall((json.dumps({'op':op,'message':payload})+'\n').encode())
+buf=b''
+while not buf.endswith(b'\n'):
+    chunk=s.recv(65536)
+    if not chunk: break
+    buf+=chunk
+print(buf.decode().strip())

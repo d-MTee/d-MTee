@@ -1,0 +1,5 @@
+# Restrict enclave egress to the AWS KMS endpoint for the deployment region.
+# Replace REGION with the AWS region before installing this file.
+allowlist:
+  - host: kms.REGION.amazonaws.com
+    port: 443

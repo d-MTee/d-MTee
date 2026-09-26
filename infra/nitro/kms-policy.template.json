@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAccountAdministration",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::${ACCOUNT_ID}:root" },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowOnlyAttestedMiniDflowEnclave",
+      "Effect": "Allow",
+      "Principal": { "AWS": "${PARENT_ROLE_ARN}" },
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey", "kms:GenerateRandom"],
+      "Resource": "*",
+      "Condition": {
+        "StringEqualsIgnoreCase": {
+          "kms:RecipientAttestation:PCR3": "${PCR3}",
+          "kms:RecipientAttestation:PCR8": "${PCR8}"
+        }
+      }
+    }
+  ]
+}

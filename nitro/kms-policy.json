@@ -1,0 +1,13 @@
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {
+      "Sid":"AllowOnlyMeasuredDflowEnclave",
+      "Effect":"Allow",
+      "Principal":{"AWS":"<EC2_INSTANCE_ROLE_ARN>"},
+      "Action":["kms:Decrypt","kms:GenerateDataKey","kms:GenerateRandom"],
+      "Resource":"*",
+      "Condition":{"StringEqualsIgnoreCase":{"kms:RecipientAttestation:PCR0":"<EIF_PCR0_SHA384>"}}
+    }
+  ]
+}

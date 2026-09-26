@@ -1,0 +1,9 @@
+{
+  "app": "npx ts-node bin/mini-dflow.ts",
+  "context": {
+    "projectName": "mini-dflow",
+    "instanceType": "m5.xlarge",
+    "enclaveCpuCount": 2,
+    "enclaveMemoryMiB": 4096
+  }
+}

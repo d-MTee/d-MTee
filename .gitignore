@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+*.log
+.DS_Store
+coverage
+# Nitro deployment secrets/artifacts
+deployment/keys/
+artifacts/
+infra/cdk/cdk.out/
+infra/cdk/dist/
