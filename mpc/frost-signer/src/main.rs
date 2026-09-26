@@ -1,9 +1,13 @@
+mod http_server;
+
 use base64;
 use frost_ed25519 as frost;
 use rand::rngs::OsRng;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
+
+use http_server::ParticipantHttpServer;
 
 const DEFAULT_DEMO_MESSAGE: &str = "mini-dflow real MPC proof";
 const DEFAULT_PARTICIPANT_ID: &str = "p1";
@@ -99,12 +103,13 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         }
     }
 
+    let server = ParticipantHttpServer::new(&participant_id, &host, port, threshold, total_participants);
     println!(
         "{}",
         serde_json::to_string_pretty(&ParticipantRuntimeStatus {
             status: "participant-ready".to_string(),
-            participant_id,
-            host,
+            participant_id: participant_id.clone(),
+            host: host.clone(),
             port,
             threshold,
             total_participants,
@@ -112,6 +117,7 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         })?
     );
 
+    server.start()?;
     Ok(())
 }
 

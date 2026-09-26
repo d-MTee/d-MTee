@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="${1:-$ROOT/mpc/frost-signer/target/release/dflow-frost-signer}"
+COMMAND="${1:-start}"
+BIN="${BIN:-$ROOT/mpc/frost-signer/target/release/dflow-frost-signer}"
 PORT_BASE="${PORT_BASE:-9001}"
 HOST="${HOST:-127.0.0.1}"
 THRESHOLD="${THRESHOLD:-2}"
@@ -14,14 +15,28 @@ if [[ ! -f "$BIN" ]]; then
   exit 1
 fi
 
-for i in $(seq 1 "$TOTAL"); do
-  participant_id="p${i}"
-  port=$((PORT_BASE + i - 1))
-  echo "[mpc] starting ${participant_id} on ${HOST}:${port}"
-  "$BIN" participant --participant-id "$participant_id" --host "$HOST" --port "$port" --threshold "$THRESHOLD" --total "$TOTAL" &
-  PIDS+=("$!")
-  sleep 0.2
-done
+case "$COMMAND" in
+  start)
+    for i in $(seq 1 "$TOTAL"); do
+      participant_id="p${i}"
+      port=$((PORT_BASE + i - 1))
+      echo "[mpc] starting ${participant_id} on ${HOST}:${port}"
+      "$BIN" participant --participant-id "$participant_id" --host "$HOST" --port "$port" --threshold "$THRESHOLD" --total "$TOTAL" &
+      PIDS+=("$!")
+      sleep 0.2
+    done
 
-trap 'kill ${PIDS[@]} 2>/dev/null || true' EXIT
-wait
+    trap 'kill ${PIDS[@]} 2>/dev/null || true' EXIT
+    wait
+    ;;
+  simulate)
+    echo "[mpc] simulating DKG + signing rounds across p1, p2, p3"
+    echo "[mpc] session create -> participant register -> dkg relay -> sign relay"
+    echo "[mpc] use Java orchestrator to drive this flow"
+    echo "[mpc] example: mvn -q -DskipTests compile && java -cp java-mcp/target/classes com.dflow.mpc.flow.RoundSequenceSimulator"
+    ;;
+  *)
+    echo "Usage: $0 [start|simulate]" >&2
+    exit 1
+    ;;
+esac
