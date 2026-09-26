@@ -31,6 +31,34 @@ function Initialize-Logs {
     } | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
+function Clear-StaleListeners {
+    $ports = @(9001, 9002, 9003, 9101, 9102, 9103, 10001, 10002, 10003, 9090)
+    $pids = @()
+
+    foreach ($port in $ports) {
+        try {
+            $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+            if ($connections) {
+                $pids += $connections | Select-Object -ExpandProperty OwningProcess
+            }
+        } catch {
+            # ignore missing network stack information
+        }
+    }
+
+    foreach ($candidatePid in ($pids | Sort-Object -Unique)) {
+        try {
+            $process = Get-Process -Id $candidatePid -ErrorAction Stop
+            if ($process) {
+                Write-SummaryLog "[cleanup] stopping stale process $($process.ProcessName) (pid $candidatePid)"
+                Stop-Process -Id $candidatePid -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            # ignore already-terminated processes
+        }
+    }
+}
+
 function Invoke-WithRetry {
     param(
         [Parameter(Mandatory = $true)]

@@ -65,7 +65,7 @@ public class MpcMcpServer {
         List<Map<String, Object>> results = new ArrayList<>();
 
         String[] participantIds = {"p1", "p2", "p3"};
-        int[] ports = {9001, 9002, 9003};
+        int[] ports = {9101, 9102, 9103};
 
         for (int i = 0; i < participantIds.length; i++) {
             results.add(registerParticipant(sessionId, participantIds[i], "127.0.0.1", ports[i]));

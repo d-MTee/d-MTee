@@ -6,10 +6,12 @@ import java.util.List;
 import java.util.Map;
 
 public class RoundSequenceSimulator {
+    private static final int[] SIMULATION_PORTS = {9101, 9102, 9103};
+
     public static void main(String[] args) throws Exception {
-        ParticipantRoundHttpServer p1 = new ParticipantRoundHttpServer("p1", 9001);
-        ParticipantRoundHttpServer p2 = new ParticipantRoundHttpServer("p2", 9002);
-        ParticipantRoundHttpServer p3 = new ParticipantRoundHttpServer("p3", 9003);
+        ParticipantRoundHttpServer p1 = new ParticipantRoundHttpServer("p1", SIMULATION_PORTS[0]);
+        ParticipantRoundHttpServer p2 = new ParticipantRoundHttpServer("p2", SIMULATION_PORTS[1]);
+        ParticipantRoundHttpServer p3 = new ParticipantRoundHttpServer("p3", SIMULATION_PORTS[2]);
 
         p1.start();
         p2.start();

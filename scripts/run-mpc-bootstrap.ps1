@@ -34,7 +34,7 @@ function Initialize-Logs {
 }
 
 function Clear-StaleListeners {
-    $ports = @(9001, 9002, 9003, 10001, 10002, 10003, 9090)
+    $ports = @(9001, 9002, 9003, 9101, 9102, 9103, 10001, 10002, 10003, 9090)
     $pids = @()
 
     foreach ($port in $ports) {

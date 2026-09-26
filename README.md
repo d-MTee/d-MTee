@@ -214,6 +214,45 @@ cd mpc/frost-signer
 cargo run --release -- demo
 ```
 
+### Windows bootstrap for the distributed participant flow
+
+This repository now includes a bootstrap runner for the local 3-participant MPC flow on Windows. It adds the Rust toolchain to `PATH`, builds the signer binary when needed, clears stale TCP listeners, validates all participant health checks, runs the Java round simulator, and then prints a summary log.
+
+```powershell
+# from the repo root
+$env:Path = "C:\Users\User\.cargo\bin;$env:Path"
+
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\run-mpc-bootstrap.ps1"
+```
+
+Alternatively, use the CMD wrapper:
+
+```cmd
+scripts\run-mpc-windows.cmd
+```
+
+The bootstrap sequence starts the live participants on:
+
+- 9001 / 10001 for p1
+- 9002 / 10002 for p2
+- 9003 / 10003 for p3
+
+The Java simulator runs in parallel on its own isolated ports:
+
+- 9101 / 9102 / 9103
+
+All run logs are stored under:
+
+```text
+%TEMP%\dflow-mpc
+```
+
+The script emits a final summary such as:
+
+```text
+[summary] success: all participants healthy, Java simulator completed
+```
+
 ## 5. AWS deployment
 
 Before uploading the enclave image, confirm that the artifacts were built successfully and the AWS identity is configured:
