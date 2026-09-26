@@ -55,6 +55,18 @@ AWS also supports PCR0/ImageSha384 and other PCR condition keys. The policy can 
 
 No plaintext key share belongs in the EIF. Store only ciphertext outside the enclave. Decrypt after attestation inside the enclave and zeroize plaintext buffers after use where practical.
 
+## Deployment gate
+
+For the production path, the deployment should not proceed unless the preflight script passes and the attestation policy is bound to the measured role and EIF identity:
+
+```bash
+./deployment/verify-deployment.sh
+./deployment/build-eif.sh
+./deployment/apply-attestation-policy.sh ./artifacts/measurements.json
+```
+
+This keeps the enclave bootstrapping and KMS authorization in a fail-closed state rather than allowing placeholder values or a mismatched parent role.
+
 ## Threats that require separate controls
 
 - CI/CD compromise: protect the EIF signing key and require release approval.

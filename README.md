@@ -1,23 +1,30 @@
-# Mini DFlow Real-World v5
+# DFlow with MPC and TEE
 
-Production-shaped reference implementation for a Solana smart-router / trading infrastructure with:
+A production-shaped reference implementation of a Solana smart-router and
+secure transaction-signing infrastructure.
 
-- Redis-backed market data
-- quote-provider abstraction
-- single-route and split-route optimization
-- slippage / price-impact / priority-fee controls
+This project combines:
+
+- Smart routing with single-route and split-route optimization
+- Redis-backed market data and quote-provider abstraction
+- Slippage, price-impact and priority-fee controls
 - Solana simulation and preflight
-- approval + policy checks
-- tamper-evident audit records
-- real 2-of-3 FROST Ed25519 threshold-signing demo
-- real AWS Nitro Enclave signer boundary
-- AWS KMS attestation policy using PCR3 + PCR8
-- AWS CDK infrastructure for the Nitro parent
-- S3 artifact delivery + SSM deployment
+- Approval and policy enforcement
+- Tamper-evident audit logging
+- Real 2-of-3 FROST Ed25519 threshold signing
+- AWS Nitro Enclave signer boundary
+- AWS KMS attestation using PCR3 + PCR8
+- AWS CDK infrastructure and SSM-based deployment
 - VSock-only application boundary
-- explicit separation between local development and hardware-backed production security
 
-> This is a deployable reference implementation, not a security certification. The cryptographic primitives are real, but an exchange-grade deployment still needs independent security review, operational controls, key ceremony, incident response and penetration testing.
+The project demonstrates the complete path from trading intent to
+policy-controlled transaction signing, with the signing boundary isolated
+inside a measured Nitro Enclave.
+
+This is a reference implementation, not a production security certification.
+The cryptographic primitives are real, while production deployment would
+still require independent security review, key ceremony, operational
+controls, monitoring, incident response and penetration testing.
 
 ## 1. Architecture
 
@@ -208,6 +215,16 @@ cargo run --release -- demo
 ```
 
 ## 5. AWS deployment
+
+Before uploading the enclave image, confirm that the artifacts were built successfully and the AWS identity is configured:
+
+```bash
+ls -l artifacts/mini-dflow-signer.eif artifacts/attestation.json
+aws sts get-caller-identity
+./deployment/upload-eif.sh
+```
+
+The upload script validates the required artifacts and the active AWS session before pushing files to S3.
 
 ### Step A — install CDK dependencies
 
@@ -481,3 +498,19 @@ protected material to the expected enclave identity"
 ```
 
 The remaining step for a true exchange-grade deployment is not another placeholder signer. It is operational hardening: independent participant accounts, protected EIF signing, durable encrypted share storage, key ceremony, monitoring, recovery, formal threat modeling and an external security audit.
+
+
+## Production Readiness
+
+This repository is a deployable reference implementation rather than a
+security-certified production system.
+
+The cryptographic primitives and AWS Nitro/KMS attestation path are implemented
+as real components. A production exchange deployment would additionally
+require independent security review, protected key ceremony, multi-account
+participant isolation, hardened CI/CD signing, monitoring, incident response,
+recovery procedures and penetration testing.
+
+The main goal of this project is to demonstrate the engineering boundary
+between a trading system, threshold signing, hardware-backed isolation and
+cloud attestation.

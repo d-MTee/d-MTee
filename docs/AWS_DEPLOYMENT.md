@@ -32,6 +32,19 @@ The deployment must fail closed if:
 - the parent role ARN does not match the expected deployment
 - enclave is launched in debug mode for a production signing path
 
+## Deployment preflight
+
+Before the KMS policy is rewritten, validate all required artifacts and infrastructure:
+
+```bash
+./deployment/verify-deployment.sh
+./deployment/build-eif.sh
+./deployment/apply-attestation-policy.sh ./artifacts/measurements.json
+./deployment/upload-eif.sh
+```
+
+This fails closed if the AWS stacks, PCR measurements, EIF artifact, or target KMS role are not ready.
+
 ## Rollout
 
 For a production rollout, add a release gate between `build-eif.sh` and `apply-attestation-policy.sh`.

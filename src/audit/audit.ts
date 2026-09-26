@@ -1,3 +1,37 @@
-import crypto from 'node:crypto'; import {redis} from '../storage/redis.js';
-export async function audit(event:string,payload:unknown){const body={event,payload,ts:new Date().toISOString(),hash:''}; body.hash=crypto.createHash('sha256').update(JSON.stringify({...body,hash:''})).digest('hex'); await redis.xadd('audit:events','MAXLEN','~','10000','*','event',event,'payload',JSON.stringify(body)); return body;}
-export async function recentAudit(n=100){const rows=await redis.xrevrange('audit:events','+','-','COUNT',n); return rows.map(r=>({id:r[0],fields:Object.fromEntries(Array.from({length:r[1].length/2},(_,i)=>[r[1][i*2],r[1][i*2+1]]))}));}
+// Audit trail for routed events and signed actions.
+import crypto from "node:crypto";
+import { redis } from "../storage/redis.js";
+export async function audit(event: string, payload: unknown) {
+  const body = { event, payload, ts: new Date().toISOString(), hash: "" };
+  body.hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ ...body, hash: "" }))
+    .digest("hex");
+  await redis.xadd(
+    "audit:events",
+    "MAXLEN",
+    "~",
+    "10000",
+    "*",
+    "event",
+    event,
+    "payload",
+    JSON.stringify(body),
+  );
+  return body;
+}
+export async function recentAudit(n = 100) {
+  const rows = (await redis.xrevrange("audit:events", "+", "-", "COUNT", n)) as Array<
+    [string, string[]]
+  >;
+
+  return rows.map((r: [string, string[]]) => ({
+    id: r[0],
+    fields: Object.fromEntries(
+      Array.from({ length: r[1].length / 2 }, (_, i) => [
+        r[1][i * 2],
+        r[1][i * 2 + 1],
+      ]),
+    ),
+  }));
+}
