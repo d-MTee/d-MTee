@@ -28,6 +28,12 @@ export function checkRoute(r: Route): Decision {
   if (r.priceImpactBps > env.MAX_SLIPPAGE_BPS) {
     reasons.push("PRICE_IMPACT");
   }
+  if (Number.isFinite(r.fees) && r.fees > 0.02 * Math.max(1, r.inputAmount)) {
+    reasons.push("FEE_TOO_HIGH");
+  }
+  if (Number.isFinite(r.expectedOutput) && Number.isFinite(r.fees) && r.fees > r.expectedOutput * 0.1) {
+    reasons.push("FEE_TOO_HIGH");
+  }
 
   return { allowed: reasons.length === 0, reasons };
 }

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { checkRoute } from "../src/risk/policy.js";
 import { RouteGraph } from "../src/router/graph.js";
 import { createServer } from "../src/api/server.js";
+import { createApproval, setApproval } from "../src/security/approval.js";
+import { evaluatePreflight } from "../src/execution/simulate.js";
 
 test("risk policy rejects excessive slippage", () => {
   const r: any = {
@@ -36,6 +38,38 @@ test("risk policy accepts normal route", () => {
     expiresAt: Date.now() + 1000,
   };
   assert.equal(checkRoute(r).allowed, true);
+});
+
+test("risk policy rejects routes with excessive fee burn", () => {
+  const r: any = {
+    inputAmount: 1000,
+    expectedOutput: 150,
+    fees: 120,
+    slippageBps: 30,
+    priceImpactBps: 20,
+    expiresAt: Date.now() + 1000,
+  };
+  assert.equal(checkRoute(r).allowed, false);
+  assert.ok(checkRoute(r).reasons.includes("FEE_TOO_HIGH"));
+});
+
+test("approval creation rejects malformed trade payloads", async () => {
+  await assert.rejects(() => createApproval({}), /REQUIRED_FIELDS/);
+  await assert.rejects(
+    () => createApproval({ id: "x", inputToken: "SOL", outputToken: "USDC" }),
+    /REQUIRED_FIELDS/,
+  );
+});
+
+test("execution preflight rejects overloaded or invalid simulations", () => {
+  assert.equal(
+    evaluatePreflight({ err: "custom", unitsConsumed: 5_000_000, priorityFeeLamports: 100_000, healthy: true }).allowed,
+    false,
+  );
+  assert.equal(
+    evaluatePreflight({ err: null, unitsConsumed: 50_000, priorityFeeLamports: 2_500, healthy: true }).allowed,
+    true,
+  );
 });
 
 test("api returns structured validation errors for invalid amount", async () => {
