@@ -5,6 +5,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
 
+const DEFAULT_DEMO_MESSAGE: &str = "mini-dflow real MPC proof";
+
 #[derive(Serialize)]
 struct DemoResult {
     threshold: u16,
@@ -21,11 +23,24 @@ fn print_usage() {
 
 Commands:
   demo [message]   Run a local 2-of-3 FROST DKG and signing flow.
-  help            Show this help text.
+  help             Show this help text.
 
-Message input is optional and defaults to a fixed demo payload.",
+Notes:
+  - Message is optional and defaults to a demo payload.
+  - Base64-encoded values are accepted for signed payloads.
+",
         env::args().next().unwrap_or_else(|| "dflow-frost-signer".to_string())
     );
+}
+
+fn parse_message(raw: Option<String>) -> Vec<u8> {
+    match raw {
+        Some(value) => match base64::decode(&value) {
+            Ok(decoded) => decoded,
+            Err(_) => value.into_bytes(),
+        },
+        None => DEFAULT_DEMO_MESSAGE.as_bytes().to_vec(),
+    }
 }
 
 fn dkg_2_of_3() -> Result<(BTreeMap<frost::Identifier, frost::keys::KeyPackage>, frost::keys::PublicKeyPackage), Box<dyn std::error::Error>> {
@@ -115,10 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match command.as_str() {
         "demo" => {
             let (keys, public) = dkg_2_of_3()?;
-            let msg_bytes = match requested_message {
-                Some(value) => base64::decode(value).unwrap_or_else(|_| value.into_bytes()),
-                None => b"mini-dflow real MPC proof".to_vec(),
-            };
+            let msg_bytes = parse_message(requested_message);
 
             let sig = sign_2_of_3(&keys, &public, &msg_bytes)?;
             println!(
@@ -136,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "help" | "-h" | "--help" => print_usage(),
         _ => {
             print_usage();
-            return Err(format!("unknown command: {command}").into());
+            return Err(format!("unknown command: {command}. Expected one of: demo, help").into());
         }
     }
 
