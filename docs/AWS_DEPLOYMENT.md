@@ -6,6 +6,8 @@ This runbook defines the complete deployment path for the MPC + Nitro TEE archit
 
 Deploy the supporting AWS infrastructure, prepare the measured enclave artifact, bind the KMS attestation policy to the final PCR values, and only then allow enclave-based signing operations to proceed.
 
+> Important: the local `mpc/frost-signer` flow proves the FROST DKG and signing logic on one machine. This runbook is the AWS production deployment path for Nitro enclaves, KMS attestation, and fail-closed key release.
+
 ## Deployment phases
 
 ### Phase 1: bootstrap the environment

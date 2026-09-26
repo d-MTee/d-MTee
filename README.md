@@ -253,6 +253,16 @@ The script emits a final summary such as:
 [summary] success: all participants healthy, Java simulator completed
 ```
 
+### Current repository state
+
+The repository now separates two distinct concerns clearly:
+
+- local cryptographic proof: `mpc/frost-signer` validates the 2-of-3 FROST DKG and signing flow in-process;
+- distributed participant flow: the Windows bootstrap script starts three independent signer runtimes and executes the Java round simulator against them;
+- AWS deployment flow: the Nitro + KMS + attestation path remains a separate production runbook and should be treated as infrastructure deployment, not as the local validation path.
+
+This keeps the proof-of-logic and production deployment guidance separate while still preserving the real-enclave architecture story.
+
 ## 5. AWS deployment
 
 Before uploading the enclave image, confirm that the artifacts were built successfully and the AWS identity is configured:
