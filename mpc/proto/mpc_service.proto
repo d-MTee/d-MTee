@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package mpc.v1;
+
+service ParticipantSigner {
+  rpc RegisterParticipant(RegisterParticipantRequest) returns (RegisterParticipantResponse);
+  rpc CreateSigningSession(CreateSigningSessionRequest) returns (CreateSigningSessionResponse);
+
+  rpc DkgRound1(DkgRound1Request) returns (DkgRound1Response);
+  rpc DkgRound2(DkgRound2Request) returns (DkgRound2Response);
+
+  rpc SignRound1(SignRound1Request) returns (SignRound1Response);
+  rpc SignRound2(SignRound2Request) returns (SignRound2Response);
+
+  rpc GetSessionStatus(GetSessionStatusRequest) returns (GetSessionStatusResponse);
+  rpc FinalizeSession(FinalizeSessionRequest) returns (FinalizeSessionResponse);
+}
+
+message RegisterParticipantRequest {
+  string participant_id = 1;
+  string host = 2;
+  string public_key = 3;
+  string role = 4;
+}
+
+message RegisterParticipantResponse {
+  bool ok = 1;
+  string status = 2;
+}
+
+message CreateSigningSessionRequest {
+  string session_id = 1;
+  repeated string participant_ids = 2;
+  uint32 threshold = 3;
+  uint32 total_participants = 4;
+  string message = 5;
+  string encoding = 6;
+}
+
+message CreateSigningSessionResponse {
+  bool ok = 1;
+  string session_id = 2;
+  string status = 3;
+}
+
+message DkgRound1Request {
+  string session_id = 1;
+  string participant_id = 2;
+  string request_id = 3;
+}
+
+message DkgRound1Response {
+  bool ok = 1;
+  string session_id = 2;
+  string participant_id = 3;
+  bytes round1_package = 4;
+  repeated bytes recipient_packages = 5;
+}
+
+message DkgRound2Request {
+  string session_id = 1;
+  string participant_id = 2;
+  bytes round1_secret = 3;
+  repeated bytes round1_packages = 4;
+}
+
+message DkgRound2Response {
+  bool ok = 1;
+  string session_id = 2;
+  string participant_id = 3;
+  bytes round2_package = 4;
+  bytes signing_key_package = 5;
+}
+
+message SignRound1Request {
+  string session_id = 1;
+  string participant_id = 2;
+  bytes message = 3;
+}
+
+message SignRound1Response {
+  bool ok = 1;
+  string session_id = 2;
+  string participant_id = 3;
+  bytes nonce = 4;
+  bytes commitment = 5;
+}
+
+message SignRound2Request {
+  string session_id = 1;
+  string participant_id = 2;
+  bytes signing_package = 3;
+  bytes nonce = 4;
+  bytes signing_key = 5;
+}
+
+message SignRound2Response {
+  bool ok = 1;
+  string session_id = 2;
+  string participant_id = 3;
+  bytes signature_share = 4;
+}
+
+message GetSessionStatusRequest {
+  string session_id = 1;
+}
+
+message GetSessionStatusResponse {
+  string session_id = 1;
+  string phase = 2;
+  bool ready = 3;
+  repeated string completed_participants = 4;
+  string error = 5;
+}
+
+message FinalizeSessionRequest {
+  string session_id = 1;
+  string request_id = 2;
+  repeated bytes signature_shares = 3;
+}
+
+message FinalizeSessionResponse {
+  bool ok = 1;
+  string session_id = 2;
+  string signature_hex = 3;
+  bool verified = 4;
+}
