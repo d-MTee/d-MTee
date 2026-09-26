@@ -1,22 +1,74 @@
-# Real AWS Nitro Enclave signer
+# Nitro enclave operational guide
 
-This is the real TEE boundary, not a local hash-based imitation.
+This directory contains the real TEE boundary for the signing flow. It is intentionally separate from the local MPC demo and represents the production boundary that enforces code and attestation integrity before key material is released.
 
-## What is implemented
+## Purpose
 
-- Nitro enclave application in Rust
-- VSock server on port 5000
-- Ed25519 private key generated inside the enclave and never exposed to the parent process
-- `attest` operation that obtains a signed Nitro attestation document from the Nitro Secure Module
-- `sign` operation that signs only inside enclave memory
-- enclave image build script (`nitro-cli build-enclave`)
-- PCR0-bound KMS policy template
-- run script for a real Nitro-enabled EC2 host
+- package the enclave as an EIF image
+- run the enclave on Nitro-capable infrastructure
+- obtain attestation evidence from the Nitro Secure Module
+- bind signing access to KMS policy conditions
+- keep private key material inside the enclave boundary
 
-AWS documents that enclave attestation documents contain PCR measurements and can be used by KMS policies; the enclave has no ordinary network access and uses VSock to communicate with its parent. KMS access is normally provided through the AWS `vsock-proxy` / KMS tooling path.
+## Components
 
-## Important production point
+- Rust enclave application under `nitro/enclave/`
+- VSock bridge for parent-to-enclave communication
+- `build-enclave.sh` for image build and EIF packaging
+- `run-enclave.sh` for enclave launch
+- attestation and KMS integration under `deployment/` and `infra/`
 
-This source proves the TEE implementation, but a Windows/Docker Desktop machine cannot execute a real Nitro enclave. The actual security property exists only after the EIF is launched on a Nitro-enabled EC2 instance. Do not use `--debug-mode` for a production attestation flow; AWS documents that debug-mode PCRs are zeros and cannot be used for cryptographic attestation.
+## Prerequisites
 
-The next production step is KMS-wrapped key persistence: encrypt the enclave signing key/data key with KMS, then release/decrypt it only when the attestation PCR policy matches. AWS provides `kmstool-enclave-cli` specifically for this pattern.
+A real Nitro execution environment requires:
+
+- Nitro-enabled EC2 host or comparable Nitro-capable runner
+- Docker installed for the enclave container build
+- `nitro-cli` installed and usable on the host
+- a valid EIF signing artifact or deployment certificate when preparing production attestation
+
+> A Windows workstation with Docker Desktop cannot run a real Nitro enclave in the same way as a Nitro-enabled Linux EC2 instance. The secure property exists only after the EIF is launched in a supported Nitro environment.
+
+## Quick start
+
+Build the enclave:
+
+```bash
+./nitro/build-enclave.sh
+```
+
+Run the packaged EIF:
+
+```bash
+./nitro/run-enclave.sh
+```
+
+Override memory and CPU settings if needed:
+
+```bash
+NITRO_MEMORY=4096 NITRO_CPU_COUNT=4 ./nitro/run-enclave.sh
+```
+
+## Operational flow
+
+1. Build the signing container.
+2. Package it into an EIF artifact.
+3. Verify the artifact exists and is signed as expected.
+4. Measure PCR values and confirm they match the deployment target.
+5. Apply the KMS attestation policy only after the measurements are approved.
+6. Launch the enclave on the Nitro host.
+7. Validate attestation and key release checks before signing.
+
+## Fail-closed rules
+
+The deployment must stop if any of the following is true:
+
+- the EIF artifact is missing or unsigned
+- PCR values are absent or unexpected
+- KMS policies contain placeholder values
+- the parent role does not match the intended deployment
+- the enclave is launched in debug mode for a production path
+
+## Production notes
+
+The enclave should never expose private key material to the parent process. KMS-wrapped key release should happen only after attestation verifies the expected PCR state. AWS tooling such as `vsock-proxy` and KMS enclave integration should be treated as required operational controls, not optional convenience features.

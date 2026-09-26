@@ -1,40 +1,65 @@
-# Real MPC / Threshold Signing
+# MPC signing operational guide
 
-This directory contains the production-oriented reference implementation for a real FROST Ed25519 threshold-signing flow.
+This module contains the local FROST-based threshold signing flow used to validate the threshold signing design before it is bound to a TEE and KMS policy boundary.
 
-## What is implemented
+## Purpose
 
-- RFC 9591 FROST threshold signatures
-- 2-of-3 threshold signing
-- Distributed Key Generation (DKG) rather than a trusted-dealer setup
-- Real commitment, share generation, and aggregation steps
-- Final verification against the aggregate verifying key
-- Local demonstration mode for reproducible testing and protocol validation
+- demonstrate 2-of-3 threshold signing
+- perform DKG without a trusted dealer
+- verify the aggregate signature using the public key package
+- provide a reproducible cryptographic proof for the broader signing architecture
 
-The Rust implementation is based on the Zcash Foundation `frost-ed25519` crate. In a live deployment, each participant must communicate over authenticated, confidential channels and run in a separate security boundary.
+## Implementation summary
 
-## Local run
+- Rust implementation under `mpc/frost-signer/src/main.rs`
+- FROST Ed25519 signing library
+- local DKG and signing flow for three participants
+- aggregate verification step before returning success
+
+## Prerequisites
+
+- Rust toolchain installed
+- Cargo available in `PATH`
+- access to a terminal that can run the local signing demo
+
+## Local quick start
+
+From the repo root:
 
 ```bash
 cd mpc/frost-signer
 cargo run --release -- demo
 ```
 
-Optional message input:
+Optional custom payload:
 
 ```bash
 cargo run --release -- demo "hello-world"
 ```
 
-## Operational notes
+## Operational model
 
-The local sample intentionally keeps the three participants in a single process so it can run on a developer machine. This proves the cryptographic workflow, but it does not provide fault isolation or independent trust domains.
+This is a protocol demonstration, not a production key ceremony. The demo intentionally keeps participants in the same process to make local testing straightforward.
 
-For a production deployment, each participant should run on a separate host, account, or enclave boundary, and DKG/signing traffic should be transported over mutual TLS or an equivalent authenticated confidential channel.
+In production:
+
+- each participant should run in a separate trust domain
+- key material should stay inside a controlled boundary
+- DKG traffic should be authenticated and confidential
+- signing should only proceed after attestation and policy checks pass
+
+## Failure conditions
+
+Treat the local flow as invalid for production if:
+
+- signing shares are logged in plaintext
+- any participant runs outside a controlled trust boundary
+- DKG material is transferred without auth or integrity protection
+- a release decision occurs before attestation is validated
 
 ## Safety expectations
 
-- Do not treat this as a production key ceremony.
-- Keep signing material out of plaintext developer logs.
-- Require attestation and policy verification before releasing any key material.
-- Use separate operational roles for release, key management, and deployment.
+- keep developer logs free of signing material
+- separate deployment, key management, and release roles
+- require attestation and KMS policy verification before any signing key is used
+- preserve the local demo as a protocol test, not as a live signing environment

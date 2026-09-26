@@ -1,72 +1,114 @@
-# AWS deployment runbook
+# AWS deployment operational guide
 
-## Order of operations
+This runbook defines the complete deployment path for the MPC + Nitro TEE architecture from infrastructure bootstrap through enclave attestation and key release.
 
-```text
-1. cdk bootstrap
-2. cdk deploy --all
-3. create EIF signing certificate
-4. build signed EIF
-5. inspect PCR0/1/2/8
-6. calculate PCR3 from parent role ARN
-7. install KMS resource + IAM attestation policy
-8. upload EIF to private S3
-9. launch enclave through SSM
-10. verify attestation and KMS decrypt
+## Deployment objective
+
+Deploy the supporting AWS infrastructure, prepare the measured enclave artifact, bind the KMS attestation policy to the final PCR values, and only then allow enclave-based signing operations to proceed.
+
+## Deployment phases
+
+### Phase 1: bootstrap the environment
+
+Prepare the AWS account and platform bootstrap state before the enclave is measured:
+
+```bash
+cd infra/cdk
+npm install
+cdk bootstrap
+cdk deploy --all
 ```
 
-## Why there are two deployment phases
+This step creates the network, IAM, KMS, and Nitro-related infrastructure needed to support the enclave runtime.
 
-PCR3 depends on the final IAM role ARN, while PCR8 depends on the EIF signing certificate. Neither is a stable value that should be guessed during the first CDK synthesis.
+### Phase 2: prepare attestation inputs
 
-Therefore CDK creates the infrastructure first, and the measured enclave artifact is bound afterward.
-
-## Failure conditions
-
-The deployment must fail closed if:
-
-- EIF is unsigned
-- PCR8 is missing
-- measurement JSON is missing
-- KMS policy contains placeholder values
-- the parent role ARN does not match the expected deployment
-- enclave is launched in debug mode for a production signing path
-
-## Deployment preflight
-
-Before the KMS policy is rewritten, validate all required artifacts and infrastructure:
+Validate the deployment state and artifacts before policy installation:
 
 ```bash
 ./deployment/verify-deployment.sh
+```
+
+This should fail closed if the required stacks, artifact outputs, PCR values, or KMS configuration are not ready.
+
+### Phase 3: build the enclave artifact
+
+Build the EIF image and capture the measurement metadata:
+
+```bash
 ./deployment/build-eif.sh
+```
+
+If the build process produces a measurement file, review the values before proceeding. PCR8 and related measurements must be inspected and approved.
+
+### Phase 4: bind the attestation policy
+
+Apply the measured policy once the final deployment values are known:
+
+```bash
 ./deployment/apply-attestation-policy.sh ./artifacts/measurements.json
+```
+
+This step must only execute after the final parent role ARN and enclave measurement values are stable. PCR3 depends on the parent role; PCR8 depends on the EIF signing certificate. Neither should be guessed early.
+
+### Phase 5: publish the artifact
+
+Upload the enclave artifact to the secure target storage before launch:
+
+```bash
 ./deployment/upload-eif.sh
 ```
 
-This fails closed if the AWS stacks, PCR measurements, EIF artifact, or target KMS role are not ready.
+The upload step should validate that the artifact, destination, and authenticated metadata all line up with the approved deployment target.
 
-## Rollout
+### Phase 6: launch and verify the enclave
 
-For a production rollout, add a release gate between `build-eif.sh` and `apply-attestation-policy.sh`.
+Once the artifact is published and the policy is in place, launch the enclave and confirm the attestation path is valid:
 
-Recommended gate:
+```bash
+./nitro/run-enclave.sh
+```
+
+Follow with the attestation and KMS verification sequence required by the production signing path.
+
+## Required gating checks
+
+The deployment must fail closed if any of these conditions are true:
+
+- EIF is missing, unsigned, or stale
+- PCR measurements are absent or untrusted
+- `measurements.json` is incomplete
+- the KMS policy still contains placeholder values
+- the parent role ARN differs from the approved target
+- the enclave is launched in debug mode for production use
+
+## Recommended release gate
+
+Use a controlled release gate between building and policy application:
 
 ```text
 source commit
-    |
-unit/integration tests
-    |
-container scan
-    |
-EIF build
-    |
-measurement approval
-    |
-release approval
-    |
-KMS PCR policy update
-    |
-parent deployment
-    |
-attestation smoke test
+  -> unit and integration tests
+  -> dependency and container checks
+  -> EIF build
+  -> measurement review
+  -> release approval
+  -> KMS PCR policy update
+  -> enclave launch
+  -> attestation smoke test
 ```
+
+## Operational checklist
+
+- [ ] AWS bootstrap complete
+- [ ] CDK stacks deployed successfully
+- [ ] EIF artifact built and measured
+- [ ] PCR values reviewed and approved
+- [ ] KMS policy updated with the final target values
+- [ ] enclave artifact uploaded to the secure destination
+- [ ] enclave launched on Nitro-enabled infrastructure
+- [ ] attestation and decryption checks verified
+
+## Production note
+
+This flow is intentionally fail-closed. The project should never allow a signing action to proceed if attestation evidence is incomplete, unstable, or mismatched to the intended deployment identity.
