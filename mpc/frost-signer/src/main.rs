@@ -1,4 +1,9 @@
+mod grpc_server;
 mod http_server;
+
+pub mod mpc_proto {
+    include!(concat!(env!("OUT_DIR"), "/mpc.v1.rs"));
+}
 
 use base64;
 use frost_ed25519 as frost;
