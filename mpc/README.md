@@ -1,20 +1,71 @@
 # MPC signing operational guide
 
-This module contains the local FROST-based threshold signing flow used to validate the threshold signing design before it is bound to a TEE and KMS policy boundary.
+This module is the proof-of-concept implementation for a real FROST Ed25519 threshold signing flow. It demonstrates the cryptographic logic correctly, but it is still a local simulator rather than a distributed custody system.
 
-## Purpose
+## Current status
 
-- demonstrate 2-of-3 threshold signing
-- perform DKG without a trusted dealer
-- verify the aggregate signature using the public key package
-- provide a reproducible cryptographic proof for the broader signing architecture
+The current code does not yet model separate networked participants operating in different processes or trust domains. Instead, it runs the full DKG and signing flow inside one Rust process:
 
-## Implementation summary
+```text
+main.rs
+  ├── Participant 1 created
+  ├── Participant 2 created
+  ├── Participant 3 created
+  ├── DKG executed
+  ├── 2-of-3 signing executed
+  └── signature verification executed
+```
 
-- Rust implementation under `mpc/frost-signer/src/main.rs`
-- FROST Ed25519 signing library
-- local DKG and signing flow for three participants
-- aggregate verification step before returning success
+This means the implementation is a strong local validation of FROST behavior, but it is not yet a custody-grade distributed system.
+
+## What is real in the current code
+
+The important point is that this is not a mock signing flow. The project uses the real `frost-ed25519` crate and executes the actual FROST steps:
+
+- participant key generation
+- DKG round 1 / round 2 flow
+- signing share creation
+- threshold signature aggregation
+- verification against the aggregate verifying key
+
+This is a genuine FROST threshold-signing implementation, not a visual placeholder or fabricated signature flow.
+
+## Target architecture after the demo phase
+
+The next meaningful evolution is a split architecture in which the Java application layer orchestrates signing requests and each Rust participant runs as an independent signer process:
+
+```text
+                Java / MCP Server
+                       │
+                   Sign Request
+                       │
+            ┌──────────┼──────────┐
+            ▼          ▼          ▼
+        Rust P1    Rust P2    Rust P3
+         share       share       share
+            │          │          │
+            └──────┬───┴──────┬───┘
+                   ▼
+              FROST signing
+                   │
+                   ▼
+            Signature / Verify
+```
+
+This would produce a more honest architecture: Java agent or MCP service as the orchestration layer, Rust workers as participant signers, and the threshold signing protocol between them.
+
+## Production requirements beyond the current demo
+
+To move from a local protocol demo to a Custody-level production design, the following controls are required:
+
+- key share storage in encrypted form
+- participant separation across isolated processes or hosts
+- per-participant authentication and authorization
+- replay protection and request ID validation
+- nonce lifecycle management and secure randomness handling
+- network transport protection for DKG and signing messages
+- HSM or TEE-backed key protection for critical share material
+- attestation and policy enforcement before secret release
 
 ## Prerequisites
 
@@ -39,7 +90,7 @@ cargo run --release -- demo "hello-world"
 
 ## Operational model
 
-This is a protocol demonstration, not a production key ceremony. The demo intentionally keeps participants in the same process to make local testing straightforward.
+This is a protocol demonstration, not a production key ceremony. The demo intentionally keeps participants in the same process to make local testing straightforward and deterministic.
 
 In production:
 
