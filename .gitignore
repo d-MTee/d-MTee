@@ -1,11 +1,51 @@
-node_modules
-dist
+# Node / app build outputs
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
 .env
+.env.*
+*.pem
+*.key
+
+# Logs and temporary files
 *.log
+*.tmp
+*.pid
+*.sqlite
+
+# Editor / OS noise
+.vscode/
+.idea/
 .DS_Store
-coverage
-# Nitro deployment secrets/artifacts
+Thumbs.db
+
+# Java / Maven / Gradle
+**/target/
+**/build/
+**/out/
+**/.gradle/
+*.class
+*.jar
+
+# Rust / Cargo
+**/target/
+**/Cargo.lock
+
+# Nitro / deployment artifacts
 deployment/keys/
 artifacts/
 infra/cdk/cdk.out/
 infra/cdk/dist/
+
+# Python caches
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Generic generated outputs
+*.generated.*
+*.stamp
