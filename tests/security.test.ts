@@ -139,3 +139,37 @@ test("signing endpoint rejects untrusted participant even with a valid attestati
 
   await new Promise((resolve) => server.close(resolve));
 });
+
+test("runtime policy accepts active key state and rejects non-active signing state", async () => {
+  const { evaluateRuntimePolicy } = await import("../src/security/runtime-policy.js");
+
+  const allow = await evaluateRuntimePolicy({
+    participantId: "p1",
+    attestation: {
+      participantId: "p1",
+      enclaveId: "mini-dflow-enclave",
+      nonce: "nonce-123456",
+      pcrs: { PCR3: "8d8d8d", PCR8: "9e9e9e" },
+      signedAt: Date.now(),
+    },
+    keyState: "ACTIVE",
+  });
+
+  assert.equal(allow.allowed, true);
+  assert.equal(allow.reason, "ALLOW_SIGNING");
+
+  const reject = await evaluateRuntimePolicy({
+    participantId: "p1",
+    attestation: {
+      participantId: "p1",
+      enclaveId: "mini-dflow-enclave",
+      nonce: "nonce-123456",
+      pcrs: { PCR3: "8d8d8d", PCR8: "9e9e9e" },
+      signedAt: Date.now(),
+    },
+    keyState: "GENERATED",
+  });
+
+  assert.equal(reject.allowed, false);
+  assert.equal(reject.reason, "KEY_NOT_ACTIVE");
+});

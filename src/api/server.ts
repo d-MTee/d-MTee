@@ -22,6 +22,7 @@ import {
 import { ThresholdSigner, NitroSigner } from "../security/signing.js";
 import { verifyAttestation } from "../security/attestation.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
+import { evaluateRuntimePolicy } from "../security/runtime-policy.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -61,7 +62,7 @@ function parseAttestation(value: unknown) {
   return null;
 }
 
-function requireTrustedAttestation(
+async function requireTrustedAttestation(
   req: any,
   res: any,
   next: () => void,
@@ -81,18 +82,28 @@ function requireTrustedAttestation(
     });
   }
 
-  const result = verifyAttestation(record);
-  if (!result.ok) {
-    return res.status(403).json({
-      error: "ATTESTATION_REJECTED",
-      errors: result.errors,
-    });
-  }
+  const keyState = typeof req.body?.keyState === "string"
+    ? req.body.keyState
+    : typeof req.headers["x-key-state"] === "string"
+      ? req.headers["x-key-state"]
+      : "ACTIVE";
 
-  if (!isParticipantAuthorized(participantId)) {
+  const policy = await evaluateRuntimePolicy({
+    participantId,
+    attestation: record,
+    keyState,
+  });
+
+  if (!policy.allowed) {
     return res.status(403).json({
-      error: "UNAUTHORIZED_PARTICIPANT",
-      message: "The participant is not authorized to sign requests.",
+      error: policy.reason,
+      message: policy.reason === "UNAUTHORIZED_PARTICIPANT"
+        ? "The participant is not authorized to sign requests."
+        : policy.reason === "ATTESTATION_REJECTED"
+          ? "The attestation record is not trusted."
+          : policy.reason === "KEY_NOT_ACTIVE"
+            ? "The signing key is not in an active state."
+            : "The runtime policy rejected the request.",
     });
   }
 
