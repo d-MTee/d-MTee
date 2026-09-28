@@ -20,6 +20,7 @@ import {
   registry,
 } from "../observability/metrics.js";
 import { ThresholdSigner, NitroSigner } from "../security/signing.js";
+import { verifyAttestation } from "../security/attestation.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -42,6 +43,45 @@ function parsePositiveNumber(value: unknown, field: string) {
     throw new Error(`${field} must be a positive number`);
   }
   return n;
+}
+
+function parseAttestation(value: unknown) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  return null;
+}
+
+function requireTrustedAttestation(
+  req: any,
+  res: any,
+  next: () => void,
+) {
+  const record = parseAttestation(req.body?.attestation ?? req.headers["x-attestation"]);
+  if (!record) {
+    return res.status(403).json({
+      error: "ATTESTATION_REQUIRED",
+      message: "A trusted attestation record is required for signing requests.",
+    });
+  }
+
+  const result = verifyAttestation(record);
+  if (!result.ok) {
+    return res.status(403).json({
+      error: "ATTESTATION_REJECTED",
+      errors: result.errors,
+    });
+  }
+
+  return next();
 }
 
 export function createServer() {
@@ -199,9 +239,10 @@ export function createServer() {
     }
   });
 
-  app.post("/sign/mpc", async (req, res) => {
+  app.post("/sign/mpc", requireTrustedAttestation, async (req, res) => {
     try {
-      const payload = Buffer.from(JSON.stringify(req.body ?? {}));
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const payload = Buffer.from(JSON.stringify({ ...body, attestation: undefined }));
       res.json({
         signature: await new ThresholdSigner().sign(payload),
         scheme: "FROST-Ed25519-2-of-3",
@@ -211,9 +252,10 @@ export function createServer() {
     }
   });
 
-  app.post("/sign/nitro", async (req, res) => {
+  app.post("/sign/nitro", requireTrustedAttestation, async (req, res) => {
     try {
-      const payload = Buffer.from(JSON.stringify(req.body ?? {}));
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const payload = Buffer.from(JSON.stringify({ ...body, attestation: undefined }));
       res.json({
         signature: await new NitroSigner().sign(payload),
         scheme: "AWS-Nitro-Enclave-Ed25519",
