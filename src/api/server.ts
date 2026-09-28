@@ -21,6 +21,7 @@ import {
 } from "../observability/metrics.js";
 import { ThresholdSigner, NitroSigner } from "../security/signing.js";
 import { verifyAttestation } from "../security/attestation.js";
+import { isParticipantAuthorized } from "../security/authorization.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -66,6 +67,13 @@ function requireTrustedAttestation(
   next: () => void,
 ) {
   const record = parseAttestation(req.body?.attestation ?? req.headers["x-attestation"]);
+  const participantId =
+    typeof req.body?.participantId === "string"
+      ? req.body.participantId
+      : typeof req.headers["x-participant-id"] === "string"
+        ? req.headers["x-participant-id"]
+        : undefined;
+
   if (!record) {
     return res.status(403).json({
       error: "ATTESTATION_REQUIRED",
@@ -78,6 +86,13 @@ function requireTrustedAttestation(
     return res.status(403).json({
       error: "ATTESTATION_REJECTED",
       errors: result.errors,
+    });
+  }
+
+  if (!isParticipantAuthorized(participantId)) {
+    return res.status(403).json({
+      error: "UNAUTHORIZED_PARTICIPANT",
+      message: "The participant is not authorized to sign requests.",
     });
   }
 

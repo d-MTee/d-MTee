@@ -92,3 +92,50 @@ test("signing endpoint rejects requests without a trusted attestation", async ()
 
   await new Promise((resolve) => server.close(resolve));
 });
+
+test("participant authorization accepts trusted participants and rejects unknown ones", async () => {
+  const { isParticipantAuthorized } = await import("../src/security/authorization.js");
+
+  assert.equal(isParticipantAuthorized("p1"), true);
+  assert.equal(isParticipantAuthorized("p2"), true);
+  assert.equal(isParticipantAuthorized("unknown"), false);
+  assert.equal(isParticipantAuthorized(""), false);
+});
+
+test("key lifecycle rejects invalid transition sequences", async () => {
+  const { isValidKeyTransition } = await import("../src/security/keys.js");
+
+  assert.equal(isValidKeyTransition("GENERATED", "ACTIVE"), true);
+  assert.equal(isValidKeyTransition("ACTIVE", "ROTATING"), true);
+  assert.equal(isValidKeyTransition("GENERATED", "REVOKED"), false);
+  assert.equal(isValidKeyTransition("ACTIVE", "UNKNOWN"), false);
+});
+
+test("signing endpoint rejects untrusted participant even with a valid attestation body", async () => {
+  const { createServer } = await import("../src/api/server.js");
+  const app = createServer();
+  const server = app.listen(0);
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  const res = await fetch(`http://127.0.0.1:${port}/sign/mpc`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      participantId: "unknown",
+      attestation: {
+        participantId: "p1",
+        enclaveId: "mini-dflow-enclave",
+        nonce: "nonce-123456",
+        pcrs: { PCR3: "8d8d8d", PCR8: "9e9e9e" },
+        signedAt: Date.now(),
+      },
+    }),
+  });
+
+  assert.equal(res.status, 403);
+  const body = await res.json();
+  assert.equal(body.error, "UNAUTHORIZED_PARTICIPANT");
+
+  await new Promise((resolve) => server.close(resolve));
+});
