@@ -187,12 +187,38 @@ Requirements:
 
 ```bash
 npm install
+npm run check:redis
 cp .env.example .env
 docker compose up -d redis
+npm run check:redis
 npm run build
 npm test
 npm run dev
 ```
+
+### Phase 2 operational runbook
+
+Before signing requests are accepted in a real deployment, verify the following checklist:
+
+```bash
+# 1) Redis is available
+npm run check:redis
+
+# 2) attestation is present and trusted
+curl -X POST http://localhost:8080/sign/mpc \
+  -H 'content-type: application/json' \
+  -d '{"participantId":"p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
+
+# 3) untrusted participant is rejected
+curl -X POST http://localhost:8080/sign/mpc \
+  -H 'content-type: application/json' \
+  -d '{"participantId":"unknown","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
+
+# 4) key lifecycle is enforced
+curl -X POST http://localhost:8080/key/REVOKED
+```
+
+If Redis is unavailable, the service will still compile but the signing and audit flows will behave as if the runtime is incomplete. In a production deployment, Redis, attestation policy validation and participant binding must all be synchronized before enabling live traffic.
 
 Useful endpoints:
 
