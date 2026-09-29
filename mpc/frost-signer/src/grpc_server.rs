@@ -7,6 +7,7 @@ use tonic::service::Interceptor;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
+use crate::key_store::KmsEncryptedKeyStore;
 use crate::mpc_proto::participant_peer_server::ParticipantPeerServer;
 use crate::mpc_proto::participant_signer_server::{ParticipantSigner, ParticipantSignerServer};
 use crate::mpc_proto::{
@@ -27,6 +28,7 @@ pub struct GrpcServer {
     runtime: Arc<Mutex<ParticipantRuntime>>,
     peer_transport: PeerTransport,
     peer_mailbox: PeerMailbox,
+    key_store: KmsEncryptedKeyStore,
 }
 
 impl GrpcServer {
@@ -52,18 +54,33 @@ impl GrpcServer {
                 "peer endpoint and certificate-pin roster must match total_participants".into(),
             );
         }
+        let key_store = KmsEncryptedKeyStore::from_env(participant_id)?;
+        let mut runtime = ParticipantRuntime::new(ParticipantConfig {
+            participant_id: participant_id.to_string(),
+            threshold,
+            total_participants,
+            ..ParticipantConfig::default()
+        });
+        if let Some(epoch) = key_store.load_active()? {
+            runtime
+                .restore_key_epoch(
+                    &epoch.key_id,
+                    epoch.threshold,
+                    epoch.total_participants,
+                    &epoch.transcript_hash,
+                    epoch.private_package,
+                    epoch.public_package,
+                )
+                .map_err(|_| "ACTIVE_KEY_EPOCH_RESTORE_FAILED")?;
+        }
         Ok(Self {
             participant_id: participant_id.to_string(),
             threshold,
             total_participants,
-            runtime: Arc::new(Mutex::new(ParticipantRuntime::new(ParticipantConfig {
-                participant_id: participant_id.to_string(),
-                threshold,
-                total_participants,
-                ..ParticipantConfig::default()
-            }))),
+            runtime: Arc::new(Mutex::new(runtime)),
             peer_transport,
             peer_mailbox,
+            key_store,
         })
     }
 
@@ -360,6 +377,22 @@ impl ParticipantSigner for GrpcServer {
                 .map_err(|_| Status::failed_precondition("DKG_FINALIZE_FAILED"))?
         };
         let public_key_hash = hex::encode(Sha256::digest(&public_key_package));
+        let private_key_package = self
+            .runtime
+            .lock()
+            .await
+            .private_key_package_bytes(&request.session_id)
+            .map_err(|_| Status::failed_precondition("PRIVATE_KEY_PACKAGE_UNAVAILABLE"))?;
+        self.key_store
+            .save_pending(
+                &request.session_id,
+                self.threshold,
+                self.total_participants,
+                &transcript_hash,
+                private_key_package,
+                &public_key_package,
+            )
+            .map_err(|_| Status::unavailable("KEY_EPOCH_ENCRYPTED_PERSISTENCE_FAILED"))?;
         self.peer_mailbox
             .record_local_finalization(&request.session_id, &transcript_hash, &public_key_hash)
             .map_err(|_| Status::failed_precondition("DKG_FINALIZATION_CONFLICT"))?;
@@ -386,6 +419,9 @@ impl ParticipantSigner for GrpcServer {
                 status: "DKG_FINALIZATION_ALL_PARTICIPANTS_PENDING".to_string(),
             }));
         }
+        self.key_store
+            .activate(&request.session_id, &transcript_hash)
+            .map_err(|_| Status::unavailable("KEY_EPOCH_PERSISTENT_ACTIVATION_FAILED"))?;
         self.runtime
             .lock()
             .await

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use frost_ed25519 as frost;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 const MAX_ACTIVE_DKG_SESSIONS: usize = 64;
 
@@ -300,11 +301,66 @@ impl ParticipantRuntime {
         if !self.key_packages.contains_key(key_id) || !self.public_packages.contains_key(key_id) {
             return Err("KEY_EPOCH_NOT_FOUND".to_string());
         }
+        self.ready_key_ids.clear();
         self.ready_key_ids.insert(key_id.to_string());
         self.key_transcript_hashes
             .insert(key_id.to_string(), transcript_hash.to_string());
         self.state.ready = true;
         Ok(())
+    }
+
+    pub fn private_key_package_bytes(&self, key_id: &str) -> Result<Vec<u8>, String> {
+        self.key_packages
+            .get(key_id)
+            .ok_or_else(|| "KEY_EPOCH_NOT_FOUND".to_string())?
+            .serialize()
+            .map_err(|error| format!("PRIVATE_KEY_PACKAGE_SERIALIZE_FAILED:{error}"))
+    }
+
+    /// Restore only a KMS-authenticated epoch and verify the private share is
+    /// consistent with its public package before it can be activated.
+    pub fn restore_key_epoch(
+        &mut self,
+        key_id: &str,
+        threshold: u16,
+        total: u16,
+        transcript_hash: &str,
+        mut private_bytes: Vec<u8>,
+        public_bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        if total != self.config.total_participants
+            || threshold != self.config.threshold
+            || transcript_hash.len() != 64
+            || !transcript_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            private_bytes.zeroize();
+            return Err("RESTORED_KEY_EPOCH_CONFIGURATION_MISMATCH".to_string());
+        }
+        let private_result = frost::keys::KeyPackage::deserialize(&private_bytes);
+        private_bytes.zeroize();
+        let key_package =
+            private_result.map_err(|error| format!("PRIVATE_KEY_PACKAGE_INVALID:{error}"))?;
+        let public_package = frost::keys::PublicKeyPackage::deserialize(&public_bytes)
+            .map_err(|error| format!("PUBLIC_KEY_PACKAGE_INVALID:{error}"))?;
+        let local_id = self.local_identifier()?;
+        if key_package.identifier() != &local_id
+            || *key_package.min_signers() != threshold
+            || key_package.verifying_key() != public_package.verifying_key()
+            || public_package.verifying_shares().get(&local_id)
+                != Some(key_package.verifying_share())
+        {
+            return Err("RESTORED_KEY_PACKAGE_BINDING_MISMATCH".to_string());
+        }
+        if public_package.min_signers() != Some(threshold)
+            || public_package.verifying_shares().len() != usize::from(total)
+            || transcript_hash.len() != 64
+        {
+            return Err("RESTORED_KEY_THRESHOLD_MISMATCH".to_string());
+        }
+        self.key_packages.insert(key_id.to_string(), key_package);
+        self.public_packages
+            .insert(key_id.to_string(), public_package);
+        self.activate_key_epoch(key_id, transcript_hash)
     }
 
     pub fn key_epoch_ready(&self, key_id: &str) -> bool {

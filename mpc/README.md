@@ -61,9 +61,26 @@ The coordinator sees only public round-one packages, status, and public-key
 packages. It never receives FROST secret packages, private key shares, or
 signing nonces.
 
-This ceremony currently holds shares and replay/transcript state in process
-memory. Restart loses unsealed state; do not use these DKG keys for custody
-until the encrypted persistence and recovery stage is completed.
+After all peers agree on the final public package, each participant encrypts
+its serialized private and public key packages with its configured AWS KMS key
+and writes only ciphertext plus authenticated metadata to its local key-store
+directory. The active epoch is selected by an atomically replaced manifest.
+Startup restores only that exact epoch and checks participant identity,
+threshold, roster size, transcript binding, local verifying share, and group
+verifying key before enabling signing. Rotation is a fresh DKG epoch followed
+by the all-peer agreement and active-manifest switch; old ciphertext is retained
+for an explicitly controlled recovery window and is never auto-selected.
+
+Set `MPC_KEY_STORE_DIR`, `FROST_KMS_KEY_ID`, and optionally `FROST_KMS_HELPER`
+and `PYTHON_BIN` for every participant. The default helper is
+`mpc/frost-signer/scripts/kms_share_store.py` and requires Python `boto3` plus
+the participant's AWS workload credentials. Give each participant a separate
+KMS key/role and constrain `kms:Decrypt` by the exact encryption context
+(`application`, `participant_id`, `key_id`, transcript hash, threshold, roster
+size, and package type). This encrypts shares at rest; the FROST participant
+process still handles plaintext shares in memory and this is not Nitro sealing.
+Validate backup restore, KMS key rotation, rollback, and destruction on the
+target AWS account before custody use.
 
 This is a genuine FROST threshold-signing implementation, not a visual placeholder or fabricated signature flow.
 

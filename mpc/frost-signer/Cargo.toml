@@ -15,6 +15,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tonic = { version = "0.12", features = ["tls"] }
 sha2 = "0.10"
 http = "1"
+zeroize = "1"
 
 [build-dependencies]
 tonic-build = "0.12"

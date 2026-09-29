@@ -1,4 +1,5 @@
 mod grpc_server;
+mod key_store;
 mod participant_runtime;
 mod peer_transport;
 
