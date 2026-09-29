@@ -8,6 +8,7 @@ service ParticipantSigner {
 
   rpc DkgRound1(DkgRound1Request) returns (DkgRound1Response);
   rpc DkgRound2(DkgRound2Request) returns (DkgRound2Response);
+  rpc DkgFinalize(DkgFinalizeRequest) returns (DkgFinalizeResponse);
 
   rpc SignRound1(SignRound1Request) returns (SignRound1Response);
   rpc SignRound2(SignRound2Request) returns (SignRound2Response);
@@ -19,7 +20,22 @@ service ParticipantSigner {
 // Peer traffic is served separately from coordinator control RPCs so each
 // endpoint can apply a different certificate allow-list.
 service ParticipantPeer {
+  rpc DeliverDkgRound1(DeliverDkgRound1Request) returns (DeliverDkgRound1Response);
   rpc DeliverDkgRound2(DeliverDkgRound2Request) returns (DeliverDkgRound2Response);
+  rpc PublishDkgTranscript(PublishDkgTranscriptRequest) returns (PublishDkgTranscriptResponse);
+  rpc PublishDkgFinalization(PublishDkgFinalizationRequest) returns (PublishDkgFinalizationResponse);
+}
+
+message DeliverDkgRound1Request {
+  string session_id = 1;
+  string sender_id = 2;
+  string recipient_id = 3;
+  bytes package = 4;
+}
+
+message DeliverDkgRound1Response {
+  bool accepted = 1;
+  string package_hash = 2;
 }
 
 message DeliverDkgRound2Request {
@@ -33,6 +49,38 @@ message DeliverDkgRound2Request {
 message DeliverDkgRound2Response {
   bool accepted = 1;
   string digest = 2;
+}
+
+message DkgTranscriptEntry {
+  string participant_id = 1;
+  string round1_package_hash = 2;
+}
+
+message PublishDkgTranscriptRequest {
+  string session_id = 1;
+  string sender_id = 2;
+  uint32 threshold = 3;
+  uint32 total_participants = 4;
+  repeated DkgTranscriptEntry entries = 5;
+  string transcript_hash = 6;
+}
+
+message PublishDkgTranscriptResponse {
+  bool accepted = 1;
+  string transcript_hash = 2;
+  uint32 matching_participants = 3;
+}
+
+message PublishDkgFinalizationRequest {
+  string session_id = 1;
+  string sender_id = 2;
+  string transcript_hash = 3;
+  string public_key_package_hash = 4;
+}
+
+message PublishDkgFinalizationResponse {
+  bool accepted = 1;
+  uint32 matching_participants = 2;
 }
 
 message RegisterParticipantRequest {
@@ -66,6 +114,8 @@ message DkgRound1Request {
   string session_id = 1;
   string participant_id = 2;
   string request_id = 3;
+  uint32 threshold = 4;
+  uint32 total_participants = 5;
 }
 
 message DkgRound1Response {
@@ -73,21 +123,35 @@ message DkgRound1Response {
   string session_id = 2;
   string participant_id = 3;
   bytes round1_package = 4;
-  repeated bytes recipient_packages = 5;
+  string package_hash = 5;
 }
 
 message DkgRound2Request {
   string session_id = 1;
   string participant_id = 2;
-  repeated bytes round1_packages = 3;
 }
 
 message DkgRound2Response {
   bool ok = 1;
   string session_id = 2;
   string participant_id = 3;
-  bytes round2_package = 4;
-  bytes signing_key_package = 5;
+  string status = 4;
+  string transcript_hash = 5;
+  uint32 delivered_packages = 6;
+}
+
+message DkgFinalizeRequest {
+  string session_id = 1;
+  string participant_id = 2;
+}
+
+message DkgFinalizeResponse {
+  bool ok = 1;
+  string session_id = 2;
+  string participant_id = 3;
+  bytes public_key_package = 4;
+  string public_key_hash = 5;
+  string status = 6;
 }
 
 message SignRound1Request {
@@ -100,8 +164,7 @@ message SignRound1Response {
   bool ok = 1;
   string session_id = 2;
   string participant_id = 3;
-  bytes nonce = 4;
-  bytes commitment = 5;
+  bytes commitment = 4;
 }
 
 message SignRound2Request {

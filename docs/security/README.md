@@ -29,11 +29,12 @@ then removing the old ID. Revocation takes effect after the API process is
 restarted or rolled out. Nitro signing also requires the root certificate
 fingerprint and approved per-participant PCR3/PCR4 plus PCR8 measurements; an
 unconfigured verifier denies requests.
-The participant command exposes only a mutually authenticated TLS gRPC control
-plane with a pinned coordinator certificate. All distributed DKG/signing RPCs
-and `/sign/mpc` still fail closed; FROST round-two traffic is not yet routed
-directly between participants, and signing participants do not yet independently
-verify policy authorization. The local FROST `demo` command remains a
+The participant command uses a coordinator-pinned control service and a
+separate peer service with participant leaf-certificate pins and peer-specific
+CA trust. DKG packages travel directly between participants; all participants
+must agree on the DKG transcript and group public-key package. FROST signing
+RPCs and `/sign/mpc` remain disabled until each signer independently verifies
+policy authorization and replay state. The local FROST `demo` command remains a
 single-process cryptographic demonstration.
 
 `GET /audit/verify` verifies the retained event chain against its Redis head.

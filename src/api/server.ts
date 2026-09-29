@@ -391,8 +391,8 @@ export function createServer() {
 
   app.post("/sign/mpc", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {
     runtimePolicyRejected.inc();
-    await audit("signing.rejected", { scheme: "FROST-Ed25519-2-of-3", reason: "LOCAL_MPC_DEMO_ONLY" }).catch(() => {});
-    res.status(503).json({ error: "DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED", message: "The available FROST binary co-locates participants and is demo-only." });
+    await audit("signing.rejected", { scheme: "FROST-Ed25519-2-of-3", reason: "DISTRIBUTED_SIGNING_NOT_CONFIGURED" }).catch(() => {});
+    res.status(503).json({ error: "DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED", message: "Distributed DKG is available, but FROST signing rounds, participant-side policy checks, and durable key shares are not yet connected." });
   });
 
   app.post("/sign/nitro", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {

@@ -162,5 +162,8 @@ not stored in this repository or on the parent EC2 host. The enclave checks the
 token before signing, so direct parent-to-VSock calls cannot bypass the policy
 gate.
 
-`/sign/mpc` returns `503 DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED` until real
-distributed FROST round handlers and authenticated participant transport exist.
+`/sign/mpc` returns `503 DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED`. The Rust
+participants now implement distributed DKG over authenticated direct peer
+transport, but signing-round orchestration, participant-side policy/replay
+validation, durable encrypted shares, and transaction integration remain
+disabled until those controls are implemented.

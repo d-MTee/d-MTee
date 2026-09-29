@@ -280,9 +280,11 @@ cargo run --release -- demo
 
 `participant` now starts only an mTLS gRPC control plane. The server requires a
 client CA and an exact coordinator-certificate SHA-256 pin. It reports
-`cryptographic_rounds_enabled: false`; all DKG/signing RPCs return
-`DISTRIBUTED_FROST_NOT_IMPLEMENTED` until direct peer DKG transport, independent
-policy verification, and protected key-share persistence are connected. The
+`dkg_rounds_enabled: true` and `signing_rounds_enabled: false`. DKG uses pinned
+participant-to-participant TLS for private round-two packages and requires all
+participants to agree on the complete round-one transcript and final public
+key package before the key epoch is activated. Signing RPCs remain disabled
+until independent policy checks and protected key-share persistence are connected. The
 `ThresholdSigner` API adapter also fails closed instead of invoking the local
 demo and returning a signature under a newly generated key.
 
@@ -291,7 +293,7 @@ demo and returning a signature under a newly generated key.
 The repository now separates two distinct concerns clearly:
 
 - local cryptographic proof: `mpc/frost-signer` validates the 2-of-3 FROST DKG and signing flow in-process;
-- distributed participant flow: per-process FROST state-machine primitives and mTLS coordinator authentication exist, while network DKG/signing rounds remain disabled until confidential peer delivery, policy checks, and recovery storage are implemented;
+- distributed participant flow: per-process FROST DKG now uses direct pinned-mTLS peer delivery and all-participant transcript/final-key agreement; distributed signing, participant-local policy enforcement, and durable encrypted share recovery remain incomplete;
 - AWS deployment flow: Nitro + KMS + attestation remains a separate deployment path and requires its measured PCR policy and KMS broker configuration.
 
 This keeps the proof-of-logic and production deployment guidance separate while still preserving the real-enclave architecture story.

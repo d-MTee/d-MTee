@@ -5,10 +5,13 @@
 //! must run one instance per trust domain and provide authenticated, confidential
 //! peer transport for directed DKG round-two messages.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use frost_ed25519 as frost;
 use rand::rngs::OsRng;
+use sha2::{Digest, Sha256};
+
+const MAX_ACTIVE_DKG_SESSIONS: usize = 64;
 
 #[derive(Clone, Debug, Default)]
 pub struct ParticipantConfig {
@@ -33,11 +36,15 @@ pub struct SessionState {
 }
 
 struct DkgState {
+    request_id: String,
     threshold: u16,
     total: u16,
+    round1_public_package: Vec<u8>,
     round1_secret: Option<frost::keys::dkg::round1::SecretPackage>,
     round2_secret: Option<frost::keys::dkg::round2::SecretPackage>,
     round1_packages: BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package>,
+    round1_hashes: BTreeMap<frost::Identifier, String>,
+    round2_packages: BTreeMap<u16, Vec<u8>>,
 }
 
 struct SigningState {
@@ -53,6 +60,8 @@ pub struct ParticipantRuntime {
     signing_sessions: HashMap<String, SigningState>,
     key_packages: HashMap<String, frost::keys::KeyPackage>,
     public_packages: HashMap<String, frost::keys::PublicKeyPackage>,
+    ready_key_ids: HashSet<String>,
+    key_transcript_hashes: HashMap<String, String>,
 }
 
 impl ParticipantRuntime {
@@ -64,6 +73,8 @@ impl ParticipantRuntime {
             signing_sessions: HashMap::new(),
             key_packages: HashMap::new(),
             public_packages: HashMap::new(),
+            ready_key_ids: HashSet::new(),
+            key_transcript_hashes: HashMap::new(),
         }
     }
 
@@ -97,6 +108,7 @@ impl ParticipantRuntime {
     pub fn dkg_round1(
         &mut self,
         session_id: &str,
+        request_id: &str,
         threshold: u16,
         total: u16,
     ) -> Result<Vec<u8>, String> {
@@ -110,8 +122,19 @@ impl ParticipantRuntime {
         if identifier.serialize().is_empty() {
             return Err("INVALID_PARTICIPANT_ID".to_string());
         }
-        if self.dkg_sessions.contains_key(session_id) || self.key_packages.contains_key(session_id)
-        {
+        if let Some(existing) = self.dkg_sessions.get(session_id) {
+            if existing.request_id == request_id
+                && existing.threshold == threshold
+                && existing.total == total
+            {
+                return Ok(existing.round1_public_package.clone());
+            }
+            return Err("DKG_SESSION_REPLAY_MISMATCH".to_string());
+        }
+        if self.dkg_sessions.len() >= MAX_ACTIVE_DKG_SESSIONS {
+            return Err("DKG_SESSION_CAPACITY_REACHED".to_string());
+        }
+        if self.key_packages.contains_key(session_id) {
             return Err("DKG_SESSION_ALREADY_EXISTS".to_string());
         }
         let mut rng = OsRng;
@@ -123,11 +146,15 @@ impl ParticipantRuntime {
         self.dkg_sessions.insert(
             session_id.to_string(),
             DkgState {
+                request_id: request_id.to_string(),
                 threshold,
                 total,
+                round1_public_package: public_bytes.clone(),
                 round1_secret: Some(secret),
                 round2_secret: None,
                 round1_packages: BTreeMap::new(),
+                round1_hashes: BTreeMap::new(),
+                round2_packages: BTreeMap::new(),
             },
         );
         self.state = SessionState {
@@ -152,23 +179,32 @@ impl ParticipantRuntime {
             .dkg_sessions
             .get_mut(session_id)
             .ok_or_else(|| "DKG_SESSION_NOT_FOUND".to_string())?;
-        if dkg.round2_secret.is_some() {
-            return Err("DKG_ROUND2_ALREADY_COMPLETED".to_string());
-        }
         if packages.len() != dkg.total.saturating_sub(1) as usize {
             return Err("DKG_ROUND1_ROSTER_INCOMPLETE".to_string());
         }
         let mut round1 = BTreeMap::new();
+        let mut round1_hashes = BTreeMap::new();
         for (index, bytes) in packages {
             let id = Self::identifier(index, dkg.total)?;
             let package = frost::keys::dkg::round1::Package::deserialize(&bytes)
                 .map_err(|error| format!("DKG_ROUND1_PACKAGE_INVALID:{error}"))?;
+            round1_hashes.insert(id, hex::encode(Sha256::digest(&bytes)));
             if round1.insert(id, package).is_some() {
                 return Err("DUPLICATE_DKG_PARTICIPANT".to_string());
             }
         }
         if round1.contains_key(&local_id) {
             return Err("LOCAL_DKG_PACKAGE_MUST_NOT_BE_REPLAYED".to_string());
+        }
+        if dkg.round2_secret.is_some() {
+            if dkg.round1_hashes != round1_hashes {
+                return Err("DKG_ROUND1_ROSTER_EQUIVOCATION".to_string());
+            }
+            return Ok(dkg
+                .round2_packages
+                .iter()
+                .map(|(id, package)| (*id, package.clone()))
+                .collect());
         }
         let secret = dkg
             .round1_secret
@@ -184,15 +220,15 @@ impl ParticipantRuntime {
                         .is_ok_and(|candidate| candidate == recipient)
                 })
                 .ok_or_else(|| "UNKNOWN_DKG_RECIPIENT".to_string())?;
-            output.push((
-                index,
-                package
-                    .serialize()
-                    .map_err(|error| format!("DKG_ROUND2_PACKAGE_SERIALIZE_FAILED:{error}"))?,
-            ));
+            let serialized = package
+                .serialize()
+                .map_err(|error| format!("DKG_ROUND2_PACKAGE_SERIALIZE_FAILED:{error}"))?;
+            output.push((index, serialized));
         }
         dkg.round2_secret = Some(round2_secret);
         dkg.round1_packages = round1;
+        dkg.round1_hashes = round1_hashes;
+        dkg.round2_packages = output.iter().cloned().collect();
         self.state.phase = "DKG_ROUND2".to_string();
         self.state.dkg_round_2_done = true;
         Ok(output)
@@ -205,10 +241,15 @@ impl ParticipantRuntime {
         session_id: &str,
         recipient_packages: Vec<(u16, Vec<u8>)>,
     ) -> Result<Vec<u8>, String> {
+        if let Some(public_package) = self.public_packages.get(session_id) {
+            return public_package
+                .serialize()
+                .map_err(|error| format!("PUBLIC_KEY_PACKAGE_SERIALIZE_FAILED:{error}"));
+        }
         let local_id = self.local_identifier()?;
         let dkg = self
             .dkg_sessions
-            .remove(session_id)
+            .get(session_id)
             .ok_or_else(|| "DKG_SESSION_NOT_FOUND".to_string())?;
         if recipient_packages.len() != dkg.total.saturating_sub(1) as usize {
             return Err("DKG_ROUND2_ROSTER_INCOMPLETE".to_string());
@@ -227,9 +268,10 @@ impl ParticipantRuntime {
         }
         let secret = dkg
             .round2_secret
+            .as_ref()
             .ok_or_else(|| "DKG_ROUND2_SECRET_MISSING".to_string())?;
         let (key_package, public_package) =
-            frost::keys::dkg::part3(&secret, &dkg.round1_packages, &round2)
+            frost::keys::dkg::part3(secret, &dkg.round1_packages, &round2)
                 .map_err(|error| format!("DKG_FINALIZE_FAILED:{error}"))?;
         if key_package.identifier() != &local_id {
             return Err("DKG_LOCAL_IDENTIFIER_MISMATCH".to_string());
@@ -237,18 +279,46 @@ impl ParticipantRuntime {
         let public_bytes = public_package
             .serialize()
             .map_err(|error| format!("PUBLIC_KEY_PACKAGE_SERIALIZE_FAILED:{error}"))?;
-        if self
-            .key_packages
-            .insert(session_id.to_string(), key_package)
-            .is_some()
-        {
+        if self.key_packages.contains_key(session_id) {
             return Err("KEY_EPOCH_ALREADY_EXISTS".to_string());
         }
+        self.dkg_sessions.remove(session_id);
+        self.key_packages
+            .insert(session_id.to_string(), key_package);
         self.public_packages
             .insert(session_id.to_string(), public_package);
         self.state.phase = "DKG_COMPLETE".to_string();
-        self.state.ready = true;
+        self.state.ready = false;
         Ok(public_bytes)
+    }
+
+    pub fn activate_key_epoch(
+        &mut self,
+        key_id: &str,
+        transcript_hash: &str,
+    ) -> Result<(), String> {
+        if !self.key_packages.contains_key(key_id) || !self.public_packages.contains_key(key_id) {
+            return Err("KEY_EPOCH_NOT_FOUND".to_string());
+        }
+        self.ready_key_ids.insert(key_id.to_string());
+        self.key_transcript_hashes
+            .insert(key_id.to_string(), transcript_hash.to_string());
+        self.state.ready = true;
+        Ok(())
+    }
+
+    pub fn key_epoch_ready(&self, key_id: &str) -> bool {
+        self.ready_key_ids.contains(key_id)
+    }
+
+    pub fn key_transcript_hash(&self, key_id: &str) -> Option<&str> {
+        self.key_transcript_hashes.get(key_id).map(String::as_str)
+    }
+
+    pub fn public_key_package_bytes(&self, key_id: &str) -> Option<Vec<u8>> {
+        self.public_packages
+            .get(key_id)
+            .and_then(|package| package.serialize().ok())
     }
 
     /// Produces a single-use FROST commitment and retains the nonce internally.
@@ -267,6 +337,9 @@ impl ParticipantRuntime {
         }
         if self.signing_sessions.contains_key(session_id) {
             return Err("SIGNING_SESSION_ALREADY_EXISTS".to_string());
+        }
+        if !self.ready_key_ids.contains(key_id) {
+            return Err("KEY_EPOCH_NOT_ACTIVE".to_string());
         }
         let key = self
             .key_packages

@@ -29,7 +29,8 @@ struct ParticipantRuntimeStatus {
     port: u16,
     threshold: u16,
     total_participants: u16,
-    cryptographic_rounds_enabled: bool,
+    dkg_rounds_enabled: bool,
+    signing_rounds_enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -119,17 +120,18 @@ fn run_participant_mode(
         }
     }
 
-    let grpc_server = GrpcServer::new(&participant_id, &host, port);
+    let grpc_server = GrpcServer::new(&participant_id, threshold, total_participants)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&ParticipantRuntimeStatus {
-            status: "mTLS-control-plane-only".to_string(),
+            status: "mTLS-dkg-enabled-signing-disabled".to_string(),
             participant_id: participant_id.clone(),
             host: host.clone(),
             port,
             threshold,
             total_participants,
-            cryptographic_rounds_enabled: false,
+            dkg_rounds_enabled: true,
+            signing_rounds_enabled: false,
         })?
     );
 

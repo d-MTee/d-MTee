@@ -11,7 +11,7 @@ Each participant must operate in a separate trust domain, with its AWS parent id
 - `p3` on `host-p3` and `account-p3`
 - `coordinator` on `coordinator-host` and `coordinator-account`
 
-The verifier binds each participant to PCR3 (parent IAM role/account) and PCR4 (parent instance); request-supplied host/account labels are ignored. The FROST participant binary now has an mTLS-only control plane with a pinned coordinator certificate, but every DKG/signing RPC and `/sign/mpc` remains disabled until peer-to-peer round delivery and participant-side policy verification are implemented.
+The verifier binds each participant to PCR3 (parent IAM role/account) and PCR4 (parent instance); request-supplied host/account labels are ignored. The FROST participant binary runs DKG over participant-pinned mutual TLS and refuses to activate a key epoch unless every participant agrees on the transcript and final public-key package. Signing RPCs and `/sign/mpc` remain disabled until each signer independently validates policy and replay state and key-share recovery is implemented.
 
 ## Preflight commands
 
@@ -44,9 +44,11 @@ If a participant is rejected:
 
 ## mTLS and confidential transport
 
-The project should use mTLS or authenticated confidential transport for participant-to-participant communications. At minimum, the deployment should prove:
+The participant command now provides mTLS direct DKG transport. Before treating it as production-ready, the deployment should prove:
 
 - each participant authenticates with a unique certificate
+- every participant presents the configured pinned leaf certificate; outbound connections trust only that peer's pinned CA and TLS server name
+- transcript equivocation, package replay, and final public-key mismatch stop key activation
 - the service requires mutual trust before signing traffic is accepted
 - the transport can only be used from the allowlisted host/account set
 
