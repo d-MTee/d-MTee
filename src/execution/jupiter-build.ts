@@ -13,6 +13,7 @@ import { env } from "../config/env.js";
 const MAX_TRANSACTION_BYTES = 1232;
 const MAX_INSTRUCTIONS = 64;
 const MAX_INSTRUCTION_DATA_BYTES = 16_384;
+const MAX_BUILD_RESPONSE_BYTES = 1_048_576;
 const COMPUTE_UNIT_LIMIT = 1_400_000;
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -39,6 +40,27 @@ function base58Encode(bytes: Uint8Array) {
 
 function sha256(value: Buffer | string) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+async function readBuildResponse(response: Response) {
+  const length = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(length) && length > MAX_BUILD_RESPONSE_BYTES) throw new Error("JUPITER_BUILD_RESPONSE_TOO_LARGE");
+  if (!response.body) throw new Error("JUPITER_BUILD_RESPONSE_INVALID");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BUILD_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error("JUPITER_BUILD_RESPONSE_TOO_LARGE");
+    }
+    chunks.push(value);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new Error("JUPITER_BUILD_RESPONSE_INVALID"); }
 }
 
 function parseInstruction(value: unknown): TransactionInstruction {
@@ -97,7 +119,7 @@ export async function prepareJupiterTransaction(input: {
   url.search = new URLSearchParams({ inputMint, outputMint, amount: String(input.amount), taker: wallet.toBase58(), slippageBps: String(input.slippageBps) }).toString();
   const response = await fetch(url, { headers: { "x-api-key": env.JUPITER_API_KEY }, signal: AbortSignal.timeout(env.RPC_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`JUPITER_BUILD_FAILED_${response.status}`);
-  const build: any = await response.json();
+  const build: any = await readBuildResponse(response);
 
   if (build.inputMint !== inputMint || build.outputMint !== outputMint || String(build.inAmount) !== String(input.amount) || Number(build.slippageBps) !== input.slippageBps) throw new Error("JUPITER_BUILD_BINDING_MISMATCH");
   if (!Array.isArray(build.routePlan) || build.routePlan.length === 0 || !Array.isArray(build.setupInstructions) || !Array.isArray(build.computeBudgetInstructions) || !Array.isArray(build.otherInstructions) || !build.swapInstruction || !build.blockhashWithMetadata) throw new Error("JUPITER_BUILD_RESPONSE_INVALID");
@@ -136,7 +158,19 @@ export async function prepareJupiterTransaction(input: {
   if (simulation.value.err) throw new Error("TRANSACTION_SIMULATION_FAILED");
 
   const transactionMessage = Buffer.from(message.serialize());
-  const routeHash = sha256(JSON.stringify(build.routePlan));
+  // Bind policy review to the complete executable recipe, not only the quoted
+  // route labels. The transaction message hash below independently binds the
+  // final compiled bytes including payer, blockhash, and lookup-table indexes.
+  const routeHash = sha256(JSON.stringify({
+    routePlan: build.routePlan,
+    computeBudgetInstructions: build.computeBudgetInstructions,
+    setupInstructions: build.setupInstructions,
+    swapInstruction: build.swapInstruction,
+    cleanupInstruction: build.cleanupInstruction ?? null,
+    otherInstructions: build.otherInstructions,
+    tipInstruction: build.tipInstruction ?? null,
+    addressesByLookupTableAddress: build.addressesByLookupTableAddress ?? null,
+  }));
   const policy = { version: 1, chainId: env.SOLANA_CLUSTER_ID, walletId: wallet.toBase58(), inputMint, outputMint, amount: String(input.amount), maxSlippageBps: input.slippageBps, routeHash };
   const policyHash = sha256(JSON.stringify(policy));
   return {
