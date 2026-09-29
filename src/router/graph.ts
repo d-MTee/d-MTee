@@ -4,6 +4,15 @@ import type { Route, Leg, Token } from "../core/types.js";
 export class RouteGraph {
   constructor(private providers: QuoteProvider[]) {}
 
+  private isUsableQuote(q: any): boolean {
+    if (!q || typeof q !== "object") return false;
+    if (!Number.isFinite(q.outAmount) || q.outAmount <= 0) return false;
+    if (!Number.isFinite(q.feeBps) || q.feeBps < 0) return false;
+    if (!Number.isFinite(q.priceImpactBps) || q.priceImpactBps < 0) return false;
+    if (!Number.isFinite(q.latencyMs) || q.latencyMs < 0) return false;
+    return typeof q.venue === "string" && typeof q.inputMint === "string" && typeof q.outputMint === "string";
+  }
+
   async best(
     input: Token,
     output: Token,
@@ -15,7 +24,7 @@ export class RouteGraph {
     );
 
     const quotes = qs.flatMap((x) =>
-      x.status === "fulfilled" ? [x.value] : [],
+      x.status === "fulfilled" && this.isUsableQuote(x.value) ? [x.value] : [],
     );
 
     if (!quotes.length) {
@@ -78,23 +87,29 @@ export class RouteGraph {
   }
 
   private routeFrom(q: any, amount: number, maxSlippageBps: number): Route {
+    const outAmount = Number(q.outAmount);
+    const feeBps = Number(q.feeBps ?? 0);
+    const priceImpactBps = Number(q.priceImpactBps ?? 0);
+    const latencyMs = Number(q.latencyMs ?? 0);
+    const timestamp = Number(q.timestamp ?? Date.now());
+
     const leg: Leg = {
       venue: q.venue,
       inputToken: q.inputMint,
       outputToken: q.outputMint,
       inputAmount: amount,
-      outputAmount: q.outAmount,
-      feeBps: q.feeBps,
-      priceImpactBps: q.priceImpactBps,
+      outputAmount: outAmount,
+      feeBps,
+      priceImpactBps,
     };
 
     const priorityFeeLamports = 5000;
-    const feeCost = (amount * q.feeBps) / 10000;
-    const impactPenalty = q.priceImpactBps * 10;
-    const latencyPenalty = Math.max(0, (q.latencyMs ?? 0) - 25) * 0.25;
-    const freshnessMs = Date.now() - (q.timestamp ?? Date.now());
+    const feeCost = (amount * feeBps) / 10000;
+    const impactPenalty = priceImpactBps * 10;
+    const latencyPenalty = Math.max(0, latencyMs - 25) * 0.25;
+    const freshnessMs = Date.now() - timestamp;
     const stalePenalty = freshnessMs > 5000 ? (freshnessMs - 5000) * 0.01 : 0;
-    const adjustedOutput = Math.max(0, q.outAmount - feeCost - impactPenalty - latencyPenalty - stalePenalty);
+    const adjustedOutput = Math.max(0, outAmount - feeCost - impactPenalty - latencyPenalty - stalePenalty);
 
     type DecisionReason = NonNullable<Route["decision"]>["reason"];
     let reason: DecisionReason = "best";

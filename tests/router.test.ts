@@ -128,6 +128,42 @@ test("route graph prefers lower-fee and lower-impact quotes", async () => {
   assert.equal(route.expectedOutput, 1050);
 });
 
+test("route graph ignores invalid provider quotes and falls back to a healthy quote", async () => {
+  const graph = new RouteGraph([
+    {
+      venue: "SIM",
+      quote: async () => ({
+        venue: "SIM",
+        inputMint: "SOL",
+        outputMint: "USDC",
+        inAmount: 1000,
+        outAmount: NaN,
+        feeBps: 0,
+        priceImpactBps: 0,
+        latencyMs: 10,
+        timestamp: Date.now(),
+      }),
+    },
+    {
+      venue: "SIM",
+      quote: async () => ({
+        venue: "SIM",
+        inputMint: "SOL",
+        outputMint: "USDC",
+        inAmount: 1000,
+        outAmount: 1100,
+        feeBps: 6,
+        priceImpactBps: 10,
+        latencyMs: 10,
+        timestamp: Date.now(),
+      }),
+    },
+  ]);
+
+  const route = await graph.best("SOL", "USDC", 1000, 50);
+  assert.equal(route.expectedOutput, 1100);
+});
+
 test("route graph penalizes stale quotes even when raw output is larger", async () => {
   const now = Date.now();
   const graph = new RouteGraph([
