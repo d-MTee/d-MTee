@@ -2,6 +2,7 @@
 import { redis } from "../storage/redis.js";
 import crypto from "node:crypto";
 import { audit } from "../audit/audit.js";
+import { env } from "../config/env.js";
 
 export type KeyState =
   | "GENERATED"
@@ -33,7 +34,7 @@ export async function initKey() {
   const x = await redis.hget("key:lifecycle", "keyId");
   if (!x)
     await redis.hset("key:lifecycle", {
-      keyId: crypto.randomUUID(),
+      keyId: env.NITRO_SIGNING_KEY_ID || crypto.randomUUID(),
       state: "GENERATED",
       createdAt: String(Date.now()),
       version: "1",
@@ -47,7 +48,22 @@ export async function transition(state: string) {
     await audit("key.transition.rejected", { from: current, to: state, error }).catch(() => {});
     throw new Error(error);
   }
-  await redis.hset("key:lifecycle", { state, updatedAt: String(Date.now()) });
+  let changed: number;
+  if (current === "ROTATING" && state === "ACTIVE") {
+    const oldKeyId = String((await redis.hget("key:lifecycle", "keyId")) ?? "");
+    const nextKeyId = env.NITRO_SIGNING_KEY_ID;
+    if (!nextKeyId || nextKeyId === oldKeyId) throw new Error("NEW_SIGNING_KEY_EPOCH_REQUIRED");
+    changed = Number(await redis.eval(
+      "if redis.call('HGET', KEYS[1], 'state') ~= 'ROTATING' or redis.call('HGET', KEYS[1], 'keyId') ~= ARGV[1] then return 0 end; redis.call('HSET', KEYS[1], 'state', 'ACTIVE', 'keyId', ARGV[2], 'updatedAt', ARGV[3]); redis.call('HINCRBY', KEYS[1], 'version', 1); return 1",
+      1, "key:lifecycle", oldKeyId, nextKeyId, String(Date.now()),
+    ));
+  } else {
+    changed = Number(await redis.eval(
+      "if redis.call('HGET', KEYS[1], 'state') ~= ARGV[1] then return 0 end; redis.call('HSET', KEYS[1], 'state', ARGV[2], 'updatedAt', ARGV[3]); return 1",
+      1, "key:lifecycle", current, state, String(Date.now()),
+    ));
+  }
+  if (changed !== 1) throw new Error("KEY_STATE_CONFLICT");
   await audit("key.transition.accepted", { from: current, to: state, updatedAt: Date.now() }).catch(() => {});
   return keyStatus();
 }

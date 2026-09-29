@@ -41,6 +41,10 @@ fi
 require_cmd docker
 require_cmd nitro-cli
 
+: "${NITRO_POLICY_AUTHORITY_PUBLIC_KEY_HEX:?Set the external policy authority public key before building the EIF}"
+: "${NITRO_PARTICIPANT_ID:?Set the participant identity for this EIF}"
+: "${NITRO_SIGNING_KEY_ID:?Set the KMS-wrapped signing key epoch for this EIF}"
+
 if [[ ! -d "$ENCLAVE_DIR" ]]; then
   echo "[nitro] enclave source directory not found: $ENCLAVE_DIR" >&2
   exit 1
@@ -51,7 +55,11 @@ mkdir -p "$OUT_DIR"
 echo "[nitro] building enclave image: ${IMAGE_NAME}:latest"
 (
   cd "$ENCLAVE_DIR"
-  docker build --tag "${IMAGE_NAME}:latest" .
+  docker build \
+    --build-arg "NITRO_POLICY_AUTHORITY_PUBLIC_KEY_HEX=${NITRO_POLICY_AUTHORITY_PUBLIC_KEY_HEX}" \
+    --build-arg "NITRO_PARTICIPANT_ID=${NITRO_PARTICIPANT_ID}" \
+    --build-arg "NITRO_SIGNING_KEY_ID=${NITRO_SIGNING_KEY_ID}" \
+    --tag "${IMAGE_NAME}:latest" .
 )
 
 echo "[nitro] packaging enclave into EIF"

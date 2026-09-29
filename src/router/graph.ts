@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import type { QuoteProvider } from "../quotes/provider.js";
 import type { Route, Leg, Token } from "../core/types.js";
+import { providerCircuitOpen, providerFailures } from "../observability/metrics.js";
 
 export class RouteGraph {
   private providerHealth = new Map<string, { failures: number; unhealthyUntil: number }>();
@@ -16,9 +17,10 @@ export class RouteGraph {
     if (state.unhealthyUntil > Date.now()) {
       return false;
     }
-
-    if (state.failures >= Number(env.QUOTE_PROVIDER_CIRCUIT_BREAKER_THRESHOLD ?? 3)) {
-      return false;
+    if (state.unhealthyUntil > 0 && state.unhealthyUntil <= Date.now()) {
+      // Permit one half-open request after the cooldown; success resets the breaker.
+      state.failures = 0;
+      state.unhealthyUntil = 0;
     }
 
     return true;
@@ -30,7 +32,9 @@ export class RouteGraph {
     const resetMs = Number(env.QUOTE_PROVIDER_CIRCUIT_BREAKER_RESET_MS ?? 60000);
     const current = this.providerHealth.get(key) ?? { failures: 0, unhealthyUntil: 0 };
     current.failures += 1;
+    providerFailures.inc({ venue: key });
     if (current.failures >= threshold) {
+      if (current.unhealthyUntil <= Date.now()) providerCircuitOpen.inc({ venue: key });
       current.unhealthyUntil = Date.now() + resetMs;
     }
     this.providerHealth.set(key, current);

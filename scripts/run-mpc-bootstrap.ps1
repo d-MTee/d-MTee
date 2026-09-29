@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+throw "DISTRIBUTED_FROST_NOT_IMPLEMENTED: bootstrap for placeholder participant rounds is disabled."
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $rustRoot = "C:\Users\User\.cargo\bin"

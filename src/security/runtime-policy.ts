@@ -1,69 +1,30 @@
-import { verifyAttestation } from "./attestation.js";
-import { isParticipantAuthorized } from "./authorization.js";
+import { verifyAttestationDocument } from "./attestation.js";
 
 export interface RuntimePolicyInput {
   participantId?: string | null;
+  /** Deprecated caller labels are ignored; PCR3/PCR4 are authoritative. */
   hostId?: string | null;
   accountId?: string | null;
+  /** Deprecated JSON field is ignored and cannot satisfy Nitro verification. */
   attestation?: unknown;
+  requestId?: string | null;
+  challengeId?: string | null;
+  attestationDocument?: string | null;
   keyState?: string | null;
 }
+export interface RuntimePolicyDecision { allowed: boolean; reason: string; }
 
-export interface RuntimePolicyDecision {
-  allowed: boolean;
-  reason: string;
-}
-
-const HOST_ALLOWLIST: Record<string, string[]> = {
-  p1: ["host-p1", "participant-1", "p1-host"],
-  p2: ["host-p2", "participant-2", "p2-host"],
-  p3: ["host-p3", "participant-3", "p3-host"],
-  coordinator: ["coordinator-host", "coordinator-node"],
-};
-
-const ACCOUNT_ALLOWLIST: Record<string, string[]> = {
-  p1: ["account-p1", "participant-1"],
-  p2: ["account-p2", "participant-2"],
-  p3: ["account-p3", "participant-3"],
-  coordinator: ["coordinator-account"],
-};
-
-function normalizeIdentity(input: string | null | undefined) {
-  if (typeof input !== "string") return undefined;
-  const value = input.trim().toLowerCase();
-  return value || undefined;
-}
-
-export async function evaluateRuntimePolicy(
-  input: RuntimePolicyInput,
-): Promise<RuntimePolicyDecision> {
-  const participantId = normalizeIdentity(input.participantId);
-
-  if (!isParticipantAuthorized(participantId)) {
-    return { allowed: false, reason: "UNAUTHORIZED_PARTICIPANT" };
+/** Policy entry point intentionally accepts only a Nitro-signed document and a one-use challenge. */
+export async function evaluateRuntimePolicy(input: RuntimePolicyInput): Promise<RuntimePolicyDecision> {
+  if (!input.participantId || !input.challengeId || !input.attestationDocument) return { allowed: false, reason: "ATTESTATION_REQUIRED" };
+  if (input.keyState !== "ACTIVE") return { allowed: false, reason: "KEY_NOT_ACTIVE" };
+  try {
+    if (!input.requestId) return { allowed: false, reason: "REQUEST_ID_REQUIRED" };
+    const verified = await verifyAttestationDocument(input.attestationDocument, input.challengeId, input.participantId, input.requestId);
+    return verified.participantId === input.participantId
+      ? { allowed: true, reason: "ALLOW_SIGNING" }
+      : { allowed: false, reason: "ATTESTATION_PARTICIPANT_MISMATCH" };
+  } catch (error) {
+    return { allowed: false, reason: error instanceof Error ? error.message : "ATTESTATION_REJECTED" };
   }
-
-  const attestationResult = verifyAttestation(input.attestation);
-  if (!attestationResult.ok) {
-    return { allowed: false, reason: "ATTESTATION_REJECTED" };
-  }
-
-  const hostId = normalizeIdentity(input.hostId);
-  const expectedHosts = participantId ? HOST_ALLOWLIST[participantId] ?? [] : [];
-  if (hostId && expectedHosts.length > 0 && !expectedHosts.includes(hostId)) {
-    return { allowed: false, reason: "PARTICIPANT_HOST_MISMATCH" };
-  }
-
-  const accountId = normalizeIdentity(input.accountId);
-  const expectedAccounts = participantId ? ACCOUNT_ALLOWLIST[participantId] ?? [] : [];
-  if (accountId && expectedAccounts.length > 0 && !expectedAccounts.includes(accountId)) {
-    return { allowed: false, reason: "PARTICIPANT_ACCOUNT_MISMATCH" };
-  }
-
-  const keyState = normalizeIdentity(input.keyState)?.toUpperCase();
-  if (keyState !== "ACTIVE") {
-    return { allowed: false, reason: "KEY_NOT_ACTIVE" };
-  }
-
-  return { allowed: true, reason: "ALLOW_SIGNING" };
 }

@@ -49,7 +49,7 @@ fn print_usage() {
 
 Commands:
   demo [message]                  Run a local 2-of-3 FROST DKG and signing flow.
-  participant                     Start a single participant runtime for distributed MPC.
+  participant                     Disabled until distributed FROST rounds are implemented.
   help                            Show this help text.
 
 Participant options:
@@ -253,7 +253,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "participant" => {
-            run_participant_mode(&mut args)?;
+            let _ = &mut args;
+            return Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED: participant endpoints currently return placeholder round data; use demo mode only".into());
         }
         "help" | "-h" | "--help" => print_usage(),
         _ => {

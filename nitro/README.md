@@ -59,6 +59,51 @@ NITRO_MEMORY=4096 NITRO_CPU_COUNT=4 ./nitro/run-enclave.sh
 6. Launch the enclave on the Nitro host.
 7. Validate attestation and key release checks before signing.
 
+### KMS-backed persistent signing seed
+
+The enclave no longer creates a fresh signing key at every boot. Before launch,
+create a random 32-byte Ed25519 seed in a controlled key ceremony, encrypt it with
+the enclave KMS key, and store only the base64 `CiphertextBlob` on the parent
+host. Set `NITRO_KMS_CIPHERTEXT_BLOB` in a root-owned environment file for
+`nitro/parent/kms_key_broker.py`; run the broker under systemd on VSock port 5001
+with an instance profile that permits `kms:Decrypt` only under the deployed
+PCR3/PCR8 recipient-attestation policy. Install the broker script as
+`/opt/mini-dflow/kms_key_broker.py`, install
+`nitro/parent/mini-dflow-kms-broker.service` into `/etc/systemd/system/`, and
+create `/etc/mini-dflow/kms-broker.env` mode `0600` containing only
+`NITRO_KMS_CIPHERTEXT_BLOB=<base64 KMS CiphertextBlob>` and `AWS_REGION=<region>`.
+Install the host's `python3-boto3` package, then enable the unit with
+`systemctl enable --now mini-dflow-kms-broker.service`. Keep the seed out of the EIF, SSM logs,
+shell history, and parent filesystem. The broker returns only KMS's
+`CiphertextForRecipient`; the enclave decrypts it with the ephemeral RSA key
+whose public key is inside the signed attestation document, then zeroizes the
+plaintext buffer.
+
+Set `NITRO_SIGNING_KEY_ID` to the stable key epoch associated with that
+ciphertext and `NITRO_EXPECTED_PUBLIC_KEY_HEX` to the Ed25519 public key derived
+from the seed. The API compares the key pin and epoch with the enclave response
+and Redis lifecycle state. The enclave signs the exact approved Solana message
+bytes; request metadata and the key epoch are checked by the API before signing.
+Rotation means encrypting a new seed, deploying its ciphertext and epoch, and
+updating the expected public-key pin and approval policy.
+Obtain the public-key pin from the enclave's `identity` VSock operation after
+successful KMS seed unwrapping, for example with
+`nitro/parent/vsock_client.py identity` on the parent host.
+
+The API verifier separately requires the AWS Nitro root certificate SHA-256
+fingerprint and participant-specific PCR3 and PCR4 values plus shared PCR8.
+PCR3 binds the parent IAM role, PCR4 the parent instance, and PCR8 the EIF signing
+certificate. Obtain values from trusted deployment measurements; placeholder or
+missing values cause signing denial. This local verifier and KMS recipient policy
+must be configured from the same approved measurements.
+
+The enclave also requires `NITRO_POLICY_AUTHORITY_PUBLIC_KEY_HEX`,
+`NITRO_PARTICIPANT_ID`, and `NITRO_SIGNING_KEY_ID` baked into the EIF. It refuses
+to sign unless the caller supplies a fresh Ed25519 policy-authorization token
+signed by the matching external authority. That private signing key must remain
+outside the API parent host; the API only verifies tokens with its pinned public
+key and forwards the token to the enclave.
+
 ## Fail-closed rules
 
 The deployment must stop if any of the following is true:

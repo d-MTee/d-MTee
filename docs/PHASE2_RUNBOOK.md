@@ -4,14 +4,14 @@ This runbook covers the deployment and operational checks required before the pr
 
 ## Required production boundaries
 
-Each participant must operate in a separate trust domain:
+Each participant must operate in a separate trust domain, with its AWS parent identity measured:
 
 - `p1` on `host-p1` and `account-p1`
 - `p2` on `host-p2` and `account-p2`
 - `p3` on `host-p3` and `account-p3`
 - `coordinator` on `coordinator-host` and `coordinator-account`
 
-Any request that mixes a participant identity with a different host or account is rejected by the runtime security policy.
+The verifier binds each participant to PCR3 (parent IAM role/account) and PCR4 (parent instance); request-supplied host/account labels are ignored. Distributed FROST participant mode remains disabled until its round handlers are implemented.
 
 ## Preflight commands
 
@@ -19,8 +19,7 @@ Any request that mixes a participant identity with a different host or account i
 npm install
 npm run redis:up
 npm run check:redis
-npm run check:participant-policy
-npm test -- --test-name-pattern "participant authorization|key lifecycle|attestation|signing endpoint|runtime policy accepts active key state"
+PARTICIPANT_ID=p1 npm run check:participant-policy
 ```
 
 ## Admission checks
@@ -28,10 +27,10 @@ npm test -- --test-name-pattern "participant authorization|key lifecycle|attesta
 Before a signing request is accepted:
 
 1. Participant ID is recognized and trusted.
-2. Attestation record is present and passes PCR verification.
-3. Participant host and account identity are consistent with the expected deployment map.
+2. Nitro COSE signature and certificate chain validate to the configured AWS root pin.
+3. PCR3, PCR4, and PCR8 match the measured participant allowlist.
 4. The signing key state is `ACTIVE`.
-5. The request is bound to the participant and enclave identity.
+5. The request is bound to participant, request ID, challenge nonce, transaction hash, key epoch, route, policy, and approval.
 
 ## Recovery actions
 

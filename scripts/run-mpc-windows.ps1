@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+throw "DISTRIBUTED_FROST_NOT_IMPLEMENTED: this bootstrap launched placeholder participant rounds and is disabled. Use 'cargo run --release --manifest-path mpc/frost-signer/Cargo.toml -- demo' for the local cryptographic demo."
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $rustExe = Join-Path $repoRoot "mpc\frost-signer\target\release\dflow-frost-signer.exe"

@@ -25,6 +25,16 @@ export class NitroStack extends cdk.Stack {
         "Parent role for Mini DFlow Nitro Enclave. KMS runtime access is added only by attestation policy.",
     });
     props.artifactBucket.grantRead(role);
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ["kms:Decrypt"],
+      resources: [props.signingKey.keyArn],
+      conditions: {
+        StringEqualsIgnoreCase: {
+          "kms:RecipientAttestation:PCR3": "<APPROVED_PARENT_ROLE_PCR3>",
+          "kms:RecipientAttestation:PCR8": "<APPROVED_EIF_SIGNING_CERT_PCR8>",
+        },
+      },
+    }));
     role.addToPolicy(
       new iam.PolicyStatement({
         actions: [

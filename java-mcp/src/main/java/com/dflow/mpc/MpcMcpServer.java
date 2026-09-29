@@ -21,10 +21,7 @@ public class MpcMcpServer {
     }
 
     public void start() throws IOException {
-        if (running.compareAndSet(false, true)) {
-            System.out.println("[mcp] starting Java MCP server on port " + port);
-            System.out.println("[mcp] ready for DKG and signing orchestration");
-        }
+        throw new UnsupportedOperationException("DISTRIBUTED_FROST_NOT_IMPLEMENTED: Java orchestration is a protocol skeleton, not a running server");
     }
 
     public void stop() {
@@ -62,26 +59,7 @@ public class MpcMcpServer {
     }
 
     public List<Map<String, Object>> simulateRoundSequence(String sessionId) {
-        List<Map<String, Object>> results = new ArrayList<>();
-
-        String[] participantIds = {"p1", "p2", "p3"};
-        int[] ports = {9101, 9102, 9103};
-
-        for (int i = 0; i < participantIds.length; i++) {
-            results.add(registerParticipant(sessionId, participantIds[i], "127.0.0.1", ports[i]));
-            results.add(relayDkgRound1(sessionId, participantIds[i], "127.0.0.1", ports[i]));
-            results.add(relayDkgRound2(sessionId, participantIds[i], "127.0.0.1", ports[i],
-                (participantIds[i] + ":dkg-secret").getBytes(),
-                (participantIds[i] + ":peer-package").getBytes()));
-            results.add(relaySignRound1(sessionId, participantIds[i], "127.0.0.1", ports[i],
-                "demo-message".getBytes()));
-            results.add(relaySignRound2(sessionId, participantIds[i], "127.0.0.1", ports[i],
-                (participantIds[i] + ":signing-package").getBytes(),
-                (participantIds[i] + ":nonce").getBytes(),
-                (participantIds[i] + ":key-package").getBytes()));
-        }
-
-        return results;
+        throw new UnsupportedOperationException("DISTRIBUTED_FROST_NOT_IMPLEMENTED: simulated round data is not cryptographic signing");
     }
 
     public static void main(String[] args) {

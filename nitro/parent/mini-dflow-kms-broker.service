@@ -1,0 +1,18 @@
+[Unit]
+Description=Mini DFlow Nitro KMS recipient broker
+After=network-online.target nitro-enclaves-vsock-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/mini-dflow/kms-broker.env
+ExecStart=/usr/bin/python3 /opt/mini-dflow/kms_key_broker.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-# DFlow with MPC and TEE
+# d-MTee
 
 A production-shaped reference implementation of a Solana smart-router and
 secure transaction-signing infrastructure.
@@ -17,9 +17,10 @@ This project combines:
 - AWS CDK infrastructure and SSM-based deployment
 - VSock-only application boundary
 
-The project demonstrates the complete path from trading intent to
-policy-controlled transaction signing, with the signing boundary isolated
-inside a measured Nitro Enclave.
+The project demonstrates routing, policy checks, a local FROST cryptographic
+demo, and an attested Nitro signing boundary. The end-to-end live transaction
+submit/retry path and independently hosted FROST participant protocol are not
+implemented; those endpoints fail closed rather than simulate successful signing.
 
 This is a reference implementation, not a production security certification.
 The cryptographic primitives are real, while production deployment would
@@ -102,9 +103,9 @@ controls, monitoring, incident response and penetration testing.
 
 ### MPC
 
-`mpc/frost-signer` executes a real 2-of-3 FROST DKG and signing flow using the `frost-ed25519` implementation.
+`mpc/frost-signer demo` executes a real 2-of-3 FROST DKG and signing flow using the `frost-ed25519` implementation. All three participants run in one process.
 
-The local demo intentionally co-locates all three participants so it can be reproduced on one machine. That proves the cryptographic protocol path, but it does not provide independent trust domains.
+The local demo intentionally co-locates all three participants so it can be reproduced on one machine. That proves the cryptographic protocol path, but it does not provide independent trust domains. Participant HTTP/gRPC mode and `/sign/mpc` are disabled until their DKG/signing handlers use real FROST packages.
 
 Production topology is three independent participants:
 
@@ -206,35 +207,30 @@ Before signing requests are accepted in a real deployment, verify the following 
 # 1) Redis is available
 npm run check:redis
 
-# 2) participant identity is isolated by host/account
-PARTICIPANT_ID=p1 HOST_ID=host-p1 ACCOUNT_ID=account-p1 npm run check:participant-policy
+# 2) Confirm the per-participant trust configuration is populated from approved measurements
+PARTICIPANT_ID=p1 npm run check:participant-policy
 
-# 3) attestation is present and trusted
-curl -X POST http://localhost:8080/sign/mpc \
-  -H 'content-type: application/json' \
-  -d '{"participantId":"p1","hostId":"host-p1","accountId":"account-p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
-
-# 4) untrusted participant is rejected
-curl -X POST http://localhost:8080/sign/mpc \
-  -H 'content-type: application/json' \
-  -d '{"participantId":"unknown","hostId":"host-p1","accountId":"account-p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
-
-# 5) key lifecycle is enforced
-curl -X POST http://localhost:8080/key/REVOKED
+# 3) Administrative operations require this bearer header
+curl -H "Authorization: Bearer $API_BEARER_TOKEN" http://localhost:8080/key/status
 ```
 
-If Redis is unavailable, the service will still compile but the signing and audit flows will behave as if the runtime is incomplete. In a production deployment, Redis, attestation policy validation, participant host/account binding, and key-state enforcement must all be synchronized before enabling live traffic.
+The checker validates configuration only; it does not prove live Nitro attestation. `/sign/mpc` is disabled because the available participant rounds are placeholders. Nitro signing additionally requires the complete approval-bound request and a fresh Nitro document; caller-supplied attestation JSON is rejected.
 
 ### Production participant isolation policy
 
-For a production deployment, each participant must be pinned to its own host and IAM/account identity:
+For a production deployment, each participant must be pinned to measured AWS identities:
 
-- `p1` -> `host-p1` and `account-p1`
-- `p2` -> `host-p2` and `account-p2`
-- `p3` -> `host-p3` and `account-p3`
-- `coordinator` -> `coordinator-host` and `coordinator-account`
+- `PCR3` -> the participant parent IAM role (including account identity)
+- `PCR4` -> the participant EC2 instance identity
+- `PCR8` -> the approved EIF signing certificate
 
-Requests that mix a participant ID with a different host or account are rejected with `PARTICIPANT_HOST_MISMATCH` or `PARTICIPANT_ACCOUNT_MISMATCH`. This keeps the runtime aligned with the architectural requirement that every signer runs in a separate trust domain.
+The server compares these measured values against participant-specific allowlists. Client-provided host/account labels are not considered evidence.
+
+The runtime now requires a bearer token on approval, key administration, attestation challenge, audit, and signing endpoints. Nitro signing accepts only a signed Nitro COSE document with a pinned certificate root, a fresh one-use challenge, request-bound user data, and configured PCR3/PCR4/PCR8 measurements. Configure `API_BEARER_TOKEN`, `NITRO_TRUSTED_ROOT_SHA256`, participant PCR values, `NITRO_SIGNING_KEY_ID`, `NITRO_EXPECTED_PUBLIC_KEY_HEX`, and `POLICY_AUTHORITY_PUBLIC_KEY_HEX` before enabling Nitro signing; missing values deny requests.
+
+Nitro signing seeds are unwrapped by KMS using the attestation document's RSA recipient key. The parent-side VSock broker is in `nitro/parent/kms_key_broker.py`; it requires a KMS-encrypted 32-byte seed in `NITRO_KMS_CIPHERTEXT_BLOB` and the restrictive PCR3/PCR8 KMS policy. Install and run that broker as a managed service on the parent host before launching the EIF.
+
+The enclave independently enforces an Ed25519 `policyAuthorization` token over the exact transaction hash, approval, route, policy, participant, and key epoch. Its public key is pinned in the EIF and API; the token issuer's private key must live in a separate trusted service. Without this token, a direct VSock request from the untrusted parent cannot obtain a signature.
 
 The runtime also respects environment-controlled safety boundaries for route drift, retry policy, and nonce validation:
 
@@ -280,52 +276,20 @@ cd mpc/frost-signer
 cargo run --release -- demo
 ```
 
-### Windows bootstrap for the distributed participant flow
+### Distributed participant mode
 
-This repository now includes a bootstrap runner for the local 3-participant MPC flow on Windows. It adds the Rust toolchain to `PATH`, builds the signer binary when needed, clears stale TCP listeners, validates all participant health checks, runs the Java round simulator, and then prints a summary log.
-
-```powershell
-# from the repo root
-$env:Path = "C:\Users\User\.cargo\bin;$env:Path"
-
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\run-mpc-bootstrap.ps1"
-```
-
-Alternatively, use the CMD wrapper:
-
-```cmd
-scripts\run-mpc-windows.cmd
-```
-
-The bootstrap sequence starts the live participants on:
-
-- 9001 / 10001 for p1
-- 9002 / 10002 for p2
-- 9003 / 10003 for p3
-
-The Java simulator runs in parallel on its own isolated ports:
-
-- 9101 / 9102 / 9103
-
-All run logs are stored under:
-
-```text
-%TEMP%\dflow-mpc
-```
-
-The script emits a final summary such as:
-
-```text
-[summary] success: all participants healthy, Java simulator completed
-```
+The previous Windows bootstrap and Java simulator used placeholder DKG packages
+and signature shares. They now stop with `DISTRIBUTED_FROST_NOT_IMPLEMENTED` and
+do not kill listeners or start mock signer processes. Use the `demo` command above
+for the supported single-process FROST cryptographic demonstration.
 
 ### Current repository state
 
 The repository now separates two distinct concerns clearly:
 
 - local cryptographic proof: `mpc/frost-signer` validates the 2-of-3 FROST DKG and signing flow in-process;
-- distributed participant flow: the Windows bootstrap script starts three independent signer runtimes and executes the Java round simulator against them;
-- AWS deployment flow: the Nitro + KMS + attestation path remains a separate production runbook and should be treated as infrastructure deployment, not as the local validation path.
+- distributed participant flow: placeholder participant rounds are explicitly disabled until real FROST rounds and authenticated transport are implemented;
+- AWS deployment flow: Nitro + KMS + attestation remains a separate deployment path and requires its measured PCR policy and KMS broker configuration.
 
 This keeps the proof-of-logic and production deployment guidance separate while still preserving the real-enclave architecture story.
 

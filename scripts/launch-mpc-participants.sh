@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+echo "DISTRIBUTED_FROST_NOT_IMPLEMENTED: participant endpoints are placeholders and disabled. Use scripts/mpc-demo.sh for the local cryptographic demo." >&2
+exit 1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMMAND="${1:-start}"

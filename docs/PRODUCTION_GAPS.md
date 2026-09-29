@@ -7,13 +7,20 @@
 - [x] Nitro Enclave signer source
 - [x] Nitro NSM attestation document generation
 - [x] VSock parent/enclave communication path
-- [x] PCR0-bound KMS policy template
-- [x] Approval workflow and audit stream
+- [x] Nitro COSE signature, pinned root, freshness, PCR3/PCR4/PCR8 and challenge verification
+- [x] KMS recipient-decrypt path for a persistent encrypted 32-byte enclave signing seed
+- [x] Bearer authorization for administrative and signing routes
+- [x] Approval-to-request binding and one-use request/nonces
+- [x] Atomic SHA-256 hash-linked audit stream and verification endpoint
+- [x] Provider, signing-policy, and send-outcome metric instrumentation
+
+The KMS broker must be installed as a managed parent-host service and the KMS
+key policy must be applied to measured PCRs before enclave signing can start.
 
 ## Requires deployment / external security work
-- [ ] Run each MPC participant in a separate trust domain/host/account
+- [ ] Implement real distributed FROST participant rounds; current participant mode and `/sign/mpc` are disabled
 - [ ] Authenticated confidential transport between MPC participants
-- [ ] Production key persistence using KMS/HSM/enclave sealing
+- [ ] Automate and independently review KMS seed provisioning, broker deployment, and key rotation
 - [ ] External independent cryptographic/security audit of this application's integration
 - [ ] Mainnet transaction builder and venue-specific execution adapters
 - [ ] Full transaction reconciliation / retry state machine

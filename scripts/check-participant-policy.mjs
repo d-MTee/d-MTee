@@ -1,37 +1,26 @@
-const participantId = (process.env.PARTICIPANT_ID ?? '').trim().toLowerCase();
-const hostId = (process.env.HOST_ID ?? '').trim().toLowerCase();
-const accountId = (process.env.ACCOUNT_ID ?? '').trim().toLowerCase();
-
-const HOST_ALLOWLIST = {
-  p1: ['host-p1', 'participant-1', 'p1-host'],
-  p2: ['host-p2', 'participant-2', 'p2-host'],
-  p3: ['host-p3', 'participant-3', 'p3-host'],
-  coordinator: ['coordinator-host', 'coordinator-node'],
+const participantId = (process.env.PARTICIPANT_ID ?? '').trim().toUpperCase();
+const allowed = new Set(['P1', 'P2', 'P3', 'COORDINATOR']);
+const values = {
+  root: process.env.NITRO_TRUSTED_ROOT_SHA256,
+  pcr3: process.env[`NITRO_PCR3_${participantId}`],
+  pcr4: process.env[`NITRO_PCR4_${participantId}`],
+  pcr8: process.env.NITRO_PCR8,
+  token: process.env.API_BEARER_TOKEN,
 };
 
-const ACCOUNT_ALLOWLIST = {
-  p1: ['account-p1', 'participant-1'],
-  p2: ['account-p2', 'participant-2'],
-  p3: ['account-p3', 'participant-3'],
-  coordinator: ['coordinator-account'],
-};
-
-if (!participantId) {
-  console.error('PARTICIPANT_ID is required.');
+if (!allowed.has(participantId)) {
+  console.error('PARTICIPANT_ID must be p1, p2, p3, or coordinator.');
   process.exit(1);
 }
-
-const expectedHosts = HOST_ALLOWLIST[participantId] ?? [];
-const expectedAccounts = ACCOUNT_ALLOWLIST[participantId] ?? [];
-
-if (hostId && expectedHosts.length > 0 && !expectedHosts.includes(hostId)) {
-  console.error(`Participant ${participantId} is bound to host ${hostId}, which is not in the allowlist: ${expectedHosts.join(', ')}`);
+const validHex = (value, length) => typeof value === 'string' && new RegExp(`^[a-fA-F0-9]{${length}}$`).test(value.replaceAll(':', ''));
+const missing = [];
+if (!validHex(values.root, 64)) missing.push('NITRO_TRUSTED_ROOT_SHA256 (SHA-256 fingerprint, 64 hex characters)');
+if (!validHex(values.pcr3, 96)) missing.push(`NITRO_PCR3_${participantId} (SHA-384 PCR3)`);
+if (!validHex(values.pcr4, 96)) missing.push(`NITRO_PCR4_${participantId} (SHA-384 PCR4)`);
+if (!validHex(values.pcr8, 96)) missing.push('NITRO_PCR8 (SHA-384 PCR8)');
+if (typeof values.token !== 'string' || values.token.length < 32) missing.push('API_BEARER_TOKEN (32+ characters)');
+if (missing.length) {
+  console.error(`Fail-closed signing policy is incomplete:\n- ${missing.join('\n- ')}`);
   process.exit(1);
 }
-
-if (accountId && expectedAccounts.length > 0 && !expectedAccounts.includes(accountId)) {
-  console.error(`Participant ${participantId} is bound to account ${accountId}, which is not in the allowlist: ${expectedAccounts.join(', ')}`);
-  process.exit(1);
-}
-
-console.log(`Participant policy OK: ${participantId} on host=${hostId || 'unset'} account=${accountId || 'unset'}`);
+console.log(`Nitro policy configuration present for ${participantId}; this checks configuration only, not live attestation.`);

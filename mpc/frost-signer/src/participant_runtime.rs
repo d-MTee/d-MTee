@@ -74,44 +74,21 @@ impl ParticipantRuntime {
     }
 
     pub fn dkg_round_1(&mut self) -> Result<DkgRound1Output, String> {
-        if self.state.session_id.is_empty() {
-            return Err("session not initialized".to_string());
-        }
-
-        self.state.dkg_round_1_done = true;
-        self.state.phase = "DKG".to_string();
-
-        Ok(DkgRound1Output {
-            participant_id: self.config.participant_id.clone(),
-            round1_package: vec![],
-            recipient_packages: vec![],
-        })
+        Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED".to_string())
     }
 
     pub fn dkg_round_2(&mut self, input: DkgRound2Input) -> Result<Vec<u8>, String> {
         let _ = input;
-        self.state.dkg_round_2_done = true;
-        self.state.ready = true;
-        self.state.phase = "READY".to_string();
-        Ok(vec![])
+        Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED".to_string())
     }
 
     pub fn sign_round_1(&mut self) -> Result<SignRound1Output, String> {
-        self.state.signing_round_1_done = true;
-        self.state.phase = "SIGNING".to_string();
-
-        Ok(SignRound1Output {
-            participant_id: self.config.participant_id.clone(),
-            nonce: vec![],
-            commitment: vec![],
-        })
+        Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED".to_string())
     }
 
     pub fn sign_round_2(&mut self, input: SignRound2Input) -> Result<Vec<u8>, String> {
         let _ = input;
-        self.state.signing_round_2_done = true;
-        self.state.phase = "DONE".to_string();
-        Ok(vec![])
+        Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED".to_string())
     }
 }
 
