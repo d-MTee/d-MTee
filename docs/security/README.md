@@ -21,7 +21,9 @@ This directory contains the production-facing security documents for the project
 Protected endpoints require `Authorization: Bearer <credential-id>.<secret>`.
 `API_AUTH_TOKENS` stores per-credential SHA-256 hashes and roles (`admin`,
 `requester`, `approver`, `signer`, `auditor`); request creation is separate
-from approval transitions. Signer credentials are scoped to participant IDs.
+from approval transitions and matching `principalId` values prevent one
+configured principal from both requesting and approving. Signer credentials
+are scoped to participant IDs. `/metrics` requires auditor authorization.
 Rotate by deploying overlapping credential records, migrating clients,
 then removing the old ID. Revocation takes effect after the API process is
 restarted or rolled out. Nitro signing also requires the root certificate

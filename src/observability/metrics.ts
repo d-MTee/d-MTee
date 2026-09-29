@@ -23,7 +23,11 @@ export const txFailed = new client.Counter({ name: "dflow_tx_failed_total", help
 export const nonceRejected = new client.Counter({ name: "dflow_nonce_rejected_total", help: "Signing or execution nonces rejected" });
 export const attestationRejected = new client.Counter({ name: "dflow_attestation_rejected_total", help: "Nitro attestations rejected" });
 export const runtimePolicyRejected = new client.Counter({ name: "dflow_runtime_policy_rejected_total", help: "Runtime policy rejections" });
+export const rateLimitRejected = new client.Counter({ name: "dflow_rate_limit_rejected_total", help: "HTTP requests rejected by rate limits", labelNames: ["bucket"] });
+export const rateLimitStorageErrors = new client.Counter({ name: "dflow_rate_limit_storage_errors_total", help: "Rate limiter Redis failures", labelNames: ["bucket"] });
 registry.registerMetric(quotes);
 registry.registerMetric(routes);
 registry.registerMetric(routeLatency);
 for (const metric of [providerFailures, providerCircuitOpen, txSubmitted, txConfirmed, txFailed, nonceRejected, attestationRejected, runtimePolicyRejected]) registry.registerMetric(metric);
+registry.registerMetric(rateLimitRejected);
+registry.registerMetric(rateLimitStorageErrors);

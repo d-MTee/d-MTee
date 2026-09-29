@@ -48,12 +48,14 @@ function validateApprovalRequest(order: unknown): ApprovalRequest {
   };
 }
 
-export async function createApproval(order: unknown) {
+export async function createApproval(order: unknown, requesterPrincipalId: string) {
+  if (!requesterPrincipalId) throw new Error("REQUESTER_ID_REQUIRED");
   const payload = validateApprovalRequest(order);
   const id = payload.id;
   const fields = {
     id,
     state: "PENDING",
+    requesterPrincipalId,
     inputToken: payload.inputToken,
     outputToken: payload.outputToken,
     amount: String(payload.amount),
@@ -77,7 +79,8 @@ export async function createApproval(order: unknown) {
   return id;
 }
 
-export async function setApproval(id: string, state: ApprovalState) {
+export async function setApproval(id: string, state: ApprovalState, actorPrincipalId: string) {
+  if (!actorPrincipalId) throw new Error("ACTOR_ID_REQUIRED");
   const allowed: Record<ApprovalState, ApprovalState[]> = {
     PENDING: ["APPROVED", "REJECTED"],
     APPROVED: ["SIGNING", "REJECTED"],
@@ -87,14 +90,19 @@ export async function setApproval(id: string, state: ApprovalState) {
   };
   if (!(state in allowed)) throw new Error("INVALID_APPROVAL_STATE");
   const changed = await redis.eval(
-    "local current = redis.call('HGET', KEYS[1], 'state'); if not current then return -1 end; local allowed = cjson.decode(ARGV[1]); for _,v in ipairs(allowed) do if current == v then redis.call('HSET', KEYS[1], 'state', ARGV[2], 'updatedAt', ARGV[3]); return 1 end end; return 0",
+    "local current = redis.call('HGET', KEYS[1], 'state'); if not current then return -1 end; if ARGV[2] == 'APPROVED' then local requester = redis.call('HGET', KEYS[1], 'requesterPrincipalId'); if not requester or requester == ARGV[4] then return -2 end end; local allowed = cjson.decode(ARGV[1]); for _,v in ipairs(allowed) do if current == v then redis.call('HSET', KEYS[1], 'state', ARGV[2], 'updatedAt', ARGV[3], 'lastActorPrincipalId', ARGV[4]); if ARGV[2] == 'APPROVED' then redis.call('HSET', KEYS[1], 'approverPrincipalId', ARGV[4]) end; return 1 end end; return 0",
     1,
     `approval:${id}`,
     JSON.stringify(allowed[state]),
     state,
     String(Date.now()),
+    actorPrincipalId,
   );
-  if (changed !== 1) throw new Error(changed === -1 ? "APPROVAL_NOT_FOUND" : "INVALID_APPROVAL_TRANSITION");
+  if (changed !== 1) {
+    if (changed === -1) throw new Error("APPROVAL_NOT_FOUND");
+    if (changed === -2) throw new Error("SELF_APPROVAL_FORBIDDEN");
+    throw new Error("INVALID_APPROVAL_TRANSITION");
+  }
   return redis.hgetall(`approval:${id}`);
 }
 

@@ -32,6 +32,7 @@ import {
 import { NitroSigner } from "../security/signing.js";
 import { createAttestationChallenge, verifyAttestationDocument } from "../security/attestation.js";
 import { authorize } from "../security/api-auth.js";
+import { rateLimit } from "../security/rate-limit.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
 
 const providers = [
@@ -148,7 +149,7 @@ function parsePositiveNumber(value: unknown, field: string) {
 
 export function createServer() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "128kb" }));
 
   app.use((req, res, next) => {
     res.set("X-Request-Id", crypto.randomUUID());
@@ -159,15 +160,16 @@ export function createServer() {
     res.json({ ok: true, service: "mini-dflow-realworld" }),
   );
 
-  app.post("/attestation/challenge", authorize("signer"), async (req, res) => {
+  app.post("/attestation/challenge", rateLimit("attestation-challenge", 20, 60_000), authorize("signer"), async (req, res) => {
     try {
       res.json(await createAttestationChallenge(String(req.body?.participantId ?? ""), String(req.body?.requestId ?? "")));
     } catch (error) {
+      await audit("attestation.challenge.rejected", { participantId: String(req.body?.participantId ?? ""), reason: normalizeError(error) }).catch(() => {});
       res.status(400).json({ error: normalizeError(error) });
     }
   });
 
-  app.get("/prices", async (_, res) => {
+  app.get("/prices", rateLimit("prices", 120, 60_000), async (_, res) => {
     try {
       res.json(await snapshot());
     } catch (error) {
@@ -175,7 +177,7 @@ export function createServer() {
     }
   });
 
-  app.get("/quote", async (req, res) => {
+  app.get("/quote", rateLimit("quote", 120, 60_000), async (req, res) => {
     const t = Date.now();
     try {
       const amount = parsePositiveNumber(req.query.amount ?? 1, "amount");
@@ -190,7 +192,7 @@ export function createServer() {
     }
   });
 
-  app.get("/route/split", async (req, res) => {
+  app.get("/route/split", rateLimit("route-split", 120, 60_000), async (req, res) => {
     const startedAt = Date.now();
     try {
       const amount = parsePositiveNumber(req.query.amount ?? 10, "amount");
@@ -205,7 +207,7 @@ export function createServer() {
     }
   });
 
-  app.get("/route/jit", async (req, res) => {
+  app.get("/route/jit", rateLimit("route-jit", 60, 60_000), async (req, res) => {
     const startedAt = Date.now();
     try {
       const amount = parsePositiveNumber(req.query.amount ?? 10, "amount");
@@ -228,7 +230,7 @@ export function createServer() {
     }
   });
 
-  app.get("/policy", async (req, res) => {
+  app.get("/policy", rateLimit("policy", 120, 60_000), async (req, res) => {
     try {
       const amount = parsePositiveNumber(req.query.amount ?? 10, "amount");
       const r = await graph.best("SOL", "USDC", amount, 100);
@@ -240,33 +242,39 @@ export function createServer() {
     }
   });
 
-  app.post("/approval", authorize("requester"), async (req, res) => {
+  app.post("/approval", rateLimit("approval-write", 20, 60_000), authorize("requester"), async (req, res) => {
     try {
-      res.json({ id: await createApproval(req.body) });
+      const requesterPrincipalId = String(res.locals.authPrincipalId ?? "");
+      const id = await createApproval(req.body, requesterPrincipalId);
+      await audit("approval.created", { approvalId: id, requesterPrincipalId }).catch(() => {});
+      res.json({ id });
     } catch (error) {
+      await audit("approval.creation.rejected", { requesterPrincipalId: String(res.locals.authPrincipalId ?? ""), reason: normalizeError(error) }).catch(() => {});
       res.status(400).json({ error: normalizeError(error) });
     }
   });
 
-  app.get("/approval/:id", authorize("requester", "approver", "auditor"), async (req, res) => {
+  app.get("/approval/:id", rateLimit("approval-read", 60, 60_000), authorize("requester", "approver", "auditor"), async (req, res) => {
     try {
-      res.json(await getApproval(req.params.id));
+      res.json(await getApproval(String(req.params.id)));
     } catch (error) {
       res.status(404).json({ error: normalizeError(error, "approval not found") });
     }
   });
 
-  app.post("/approval/:id/:state", authorize("approver"), async (req, res) => {
+  app.post("/approval/:id/:state", rateLimit("approval-write", 20, 60_000), authorize("approver"), async (req, res) => {
     try {
-      res.json(
-        await setApproval(req.params.id, req.params.state.toUpperCase() as any),
-      );
+      const actorPrincipalId = String(res.locals.authPrincipalId ?? "");
+      const approval = await setApproval(String(req.params.id), String(req.params.state).toUpperCase() as any, actorPrincipalId);
+      await audit("approval.transitioned", { approvalId: String(req.params.id), state: approval.state, actorPrincipalId }).catch(() => {});
+      res.json(approval);
     } catch (error) {
+      await audit("approval.transition.rejected", { approvalId: String(req.params.id), actorPrincipalId: String(res.locals.authPrincipalId ?? ""), reason: normalizeError(error) }).catch(() => {});
       res.status(400).json({ error: normalizeError(error) });
     }
   });
 
-  app.get("/simulate", async (_, res) => {
+  app.get("/simulate", rateLimit("simulation", 30, 60_000), async (_, res) => {
     try {
       res.json(await simulateDevnet());
     } catch (error) {
@@ -274,7 +282,7 @@ export function createServer() {
     }
   });
 
-  app.get("/priority-fees", async (_, res) => {
+  app.get("/priority-fees", rateLimit("priority-fees", 60, 60_000), async (_, res) => {
     try {
       res.json(await priorityFees());
     } catch (error) {
@@ -282,7 +290,7 @@ export function createServer() {
     }
   });
 
-  app.post("/execution/validate", async (req, res) => {
+  app.post("/execution/validate", rateLimit("execution-validate", 60, 60_000), async (req, res) => {
     try {
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const decision = evaluateRouteConsistency({
@@ -303,7 +311,7 @@ export function createServer() {
     }
   });
 
-  app.get("/audit", authorize("auditor"), async (_, res) => {
+  app.get("/audit", rateLimit("audit-read", 60, 60_000), authorize("auditor"), async (_, res) => {
     try {
       res.json(await recentAudit());
     } catch (error) {
@@ -311,7 +319,7 @@ export function createServer() {
     }
   });
 
-  app.get("/key/status", authorize("auditor"), async (_, res) => {
+  app.get("/key/status", rateLimit("key-status", 60, 60_000), authorize("auditor"), async (_, res) => {
     try {
       res.json(await keyStatus());
     } catch (error) {
@@ -319,7 +327,7 @@ export function createServer() {
     }
   });
 
-  app.post("/key/init", authorize("admin"), async (_, res) => {
+  app.post("/key/init", rateLimit("key-init", 5, 60_000), authorize("admin"), async (_, res) => {
     try {
       res.json(await initKey());
     } catch (error) {
@@ -327,27 +335,27 @@ export function createServer() {
     }
   });
 
-  app.post("/key/:state", authorize("admin"), async (req, res) => {
+  app.post("/key/:state", rateLimit("key-transition", 10, 60_000), authorize("admin"), async (req, res) => {
     try {
-      res.json(await transition(req.params.state.toUpperCase()));
+      res.json(await transition(String(req.params.state).toUpperCase()));
     } catch (error) {
       res.status(400).json({ error: normalizeError(error) });
     }
   });
 
-  app.post("/sign/mpc", authorize("signer"), async (req, res) => {
+  app.post("/sign/mpc", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {
     runtimePolicyRejected.inc();
     await audit("signing.rejected", { scheme: "FROST-Ed25519-2-of-3", reason: "LOCAL_MPC_DEMO_ONLY" }).catch(() => {});
     res.status(503).json({ error: "DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED", message: "The available FROST binary co-locates participants and is demo-only." });
   });
 
-  app.post("/sign/nitro", authorize("signer"), async (req, res) => {
+  app.post("/sign/nitro", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {
     try {
       const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
       await verifySigningRequest(body);
       const payload = transactionMessageToSign(body);
       const signature = await new NitroSigner().sign(payload, body.policyAuthorization);
-      await setApproval(body.approvalId, "EXECUTED");
+      await setApproval(body.approvalId, "EXECUTED", `nitro:${String(body.participantId)}`);
       await audit("signing.completed", { scheme: "AWS-Nitro-Enclave-Ed25519", requestId: body.requestId, participantId: body.participantId, approvalId: body.approvalId });
       res.json({
         signature,
@@ -361,7 +369,7 @@ export function createServer() {
     }
   });
 
-  app.get("/metrics", async (_, res) => {
+  app.get("/metrics", rateLimit("metrics", 30, 60_000), authorize("auditor"), async (_, res) => {
     try {
       res.set("Content-Type", registry.contentType);
       res.end(await registry.metrics());
@@ -370,7 +378,7 @@ export function createServer() {
     }
   });
 
-  app.get("/quote/jupiter", async (req, res) => {
+  app.get("/quote/jupiter", rateLimit("jupiter-quote", 60, 60_000), async (req, res) => {
     try {
       const j = new JupiterProvider();
       const amount = parsePositiveNumber(req.query.amount, "amount");
@@ -388,7 +396,7 @@ export function createServer() {
     }
   });
 
-  app.get("/audit/verify", authorize("auditor"), async (_req, res) => {
+  app.get("/audit/verify", rateLimit("audit-verify", 10, 60_000), authorize("auditor"), async (_req, res) => {
     try { res.json(await verifyAuditChain()); }
     catch (error) { res.status(503).json({ error: normalizeError(error) }); }
   });

@@ -22,6 +22,7 @@ PARAMETER_NAME="/mini-dflow/${PARTICIPANT_ID}/kms-ciphertext"
 aws ssm put-parameter --name "$PARAMETER_NAME" --type SecureString --value "$CIPHERTEXT" --overwrite --region "$AWS_REGION" >/dev/null
 aws s3 cp "$ROOT/nitro/parent/kms_key_broker.py" "s3://${BUCKET}/security/kms_key_broker.py" --region "$AWS_REGION" --only-show-errors
 aws s3 cp "$ROOT/nitro/parent/configure_kms_broker.py" "s3://${BUCKET}/security/configure_kms_broker.py" --region "$AWS_REGION" --only-show-errors
+aws s3 cp "$ROOT/nitro/parent/vsock_client.py" "s3://${BUCKET}/security/vsock_client.py" --region "$AWS_REGION" --only-show-errors
 aws s3 cp "$ROOT/nitro/parent/mini-dflow-kms-broker.service" "s3://${BUCKET}/security/mini-dflow-kms-broker.service" --region "$AWS_REGION" --only-show-errors
 
 PARAMS="$(jq -n --arg bucket "$BUCKET" --arg region "$AWS_REGION" --arg parameter "$PARAMETER_NAME" '{commands:[
@@ -30,10 +31,12 @@ PARAMS="$(jq -n --arg bucket "$BUCKET" --arg region "$AWS_REGION" --arg paramete
   "install -d -m 0755 /opt/mini-dflow /etc/mini-dflow",
   ("aws s3 cp s3://" + $bucket + "/security/kms_key_broker.py /opt/mini-dflow/kms_key_broker.py --region " + $region),
   ("aws s3 cp s3://" + $bucket + "/security/configure_kms_broker.py /opt/mini-dflow/configure_kms_broker.py --region " + $region),
+  ("aws s3 cp s3://" + $bucket + "/security/vsock_client.py /opt/mini-dflow/vsock_client.py --region " + $region),
   ("aws s3 cp s3://" + $bucket + "/security/mini-dflow-kms-broker.service /etc/systemd/system/mini-dflow-kms-broker.service --region " + $region),
   ("python3 /opt/mini-dflow/configure_kms_broker.py " + $parameter + " " + $region),
   "systemctl daemon-reload",
-  "systemctl enable --now mini-dflow-kms-broker.service",
+  "systemctl enable mini-dflow-kms-broker.service",
+  "systemctl restart mini-dflow-kms-broker.service",
   "systemctl is-active --quiet mini-dflow-kms-broker.service"
 ]}' )"
 COMMAND_ID="$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript --parameters "$PARAMS" --region "$AWS_REGION" --query Command.CommandId --output text)"

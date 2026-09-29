@@ -60,9 +60,15 @@ SecureString.
 5. Set the API's `NITRO_SIGNING_KEY_ID` and
    `NITRO_EXPECTED_PUBLIC_KEY_HEX` from the same bundle, update its participant
    PCR3/PCR4 and shared PCR8 allowlists from approved measurements, and roll out
-   the API. Launch the EIF and verify the enclave `identity` response matches
-   the configured key epoch and public-key pin. Test KMS denial and a valid
-   attestation before enabling signing.
+   the API. Launch the EIF, then verify the live broker, enclave and key pin:
+
+   ```bash
+   PARTICIPANT_ID=p1 bash deployment/verify-live-enclave.sh artifacts/p1-seed-bundle.json
+   ```
+
+   This checks broker/enclave state and calls `identity` over VSock, which
+   confirms the enclave's KMS-unwrapped public key matches the bundle. Test KMS
+   denial and a valid attestation before enabling signing.
 
 ## Rotation
 

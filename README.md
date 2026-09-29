@@ -266,7 +266,7 @@ curl 'http://localhost:8080/route/jit?amount=100'
 curl 'http://localhost:8080/policy?amount=100'
 curl http://localhost:8080/simulate
 curl http://localhost:8080/priority-fees
-curl http://localhost:8080/metrics
+curl -H "Authorization: Bearer $AUDITOR_CREDENTIAL" http://localhost:8080/metrics
 ```
 
 Run the real FROST demo:
@@ -382,6 +382,8 @@ The API's `NITRO_EXPECTED_PUBLIC_KEY_HEX` must match the public-key pin in the
 same seed bundle. After approving measurements and applying the KMS policy,
 install the participant ciphertext and parent broker with
 `PARTICIPANT_ID=p1 bash deployment/install-kms-broker.sh <seed-bundle.json>`.
+Verify the running enclave and its KMS-unwrapped key pin with
+`PARTICIPANT_ID=p1 bash deployment/verify-live-enclave.sh <seed-bundle.json>`.
 See [KMS bootstrap and rotation](docs/security/KMS_BOOTSTRAP_ROTATION.md) for
 the complete order, rollback, and recovery details.
 

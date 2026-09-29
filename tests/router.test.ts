@@ -55,9 +55,9 @@ test("risk policy rejects routes with excessive fee burn", () => {
 });
 
 test("approval creation rejects malformed trade payloads", async () => {
-  await assert.rejects(() => createApproval({}), /REQUIRED_FIELDS/);
+  await assert.rejects(() => createApproval({}, "requester-test"), /REQUIRED_FIELDS/);
   await assert.rejects(
-    () => createApproval({ id: "x", inputToken: "SOL", outputToken: "USDC" }),
+    () => createApproval({ id: "x", inputToken: "SOL", outputToken: "USDC" }, "requester-test"),
     /REQUIRED_FIELDS/,
   );
 });

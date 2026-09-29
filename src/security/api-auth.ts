@@ -3,9 +3,9 @@ import { env } from "../config/env.js";
 import { audit } from "../audit/audit.js";
 
 type Role = "admin" | "requester" | "approver" | "signer" | "auditor";
-type Credential = { id: string; secretHash: string; roles: Role[]; participantIds?: string[] };
+type Credential = { id: string; principalId: string; secretHash: string; roles: Role[]; participantIds?: string[] };
 type AuthRequest = { headers: Record<string, unknown>; body?: Record<string, unknown> };
-type AuthResponse = { status: (n: number) => any; json: (v: unknown) => any };
+type AuthResponse = { status: (n: number) => any; json: (v: unknown) => any; locals: Record<string, unknown> };
 
 function configuredCredentials(): Credential[] | undefined {
   try {
@@ -13,6 +13,7 @@ function configuredCredentials(): Credential[] | undefined {
     if (!Array.isArray(parsed)) return undefined;
     const credentials = parsed.filter((item): item is Credential =>
       item && typeof item.id === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(item.id) &&
+      typeof item.principalId === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(item.principalId) &&
       typeof item.secretHash === "string" && /^[a-fA-F0-9]{64}$/.test(item.secretHash) &&
       Array.isArray(item.roles) && item.roles.length > 0 &&
       item.roles.every((role: unknown) => ["admin", "requester", "approver", "signer", "auditor"].includes(String(role))) &&
@@ -55,6 +56,8 @@ export function authorize(...allowedRoles: Role[]) {
       void audit("security.api_auth.rejected", { credentialId: id || "unknown", requiredRoles: allowedRoles }).catch(() => {});
       return res.status(403).json({ error: "FORBIDDEN" });
     }
+    res.locals.authCredentialId = id;
+    res.locals.authPrincipalId = credential.principalId;
     next();
   };
 }

@@ -16,7 +16,7 @@
 - GET `/key/status`
 - POST `/key/init`
 - POST `/key/:state`
-- GET `/metrics`
+- GET `/metrics` (auditor auth)
 - POST `/attestation/challenge` (Bearer auth; requires `participantId` and `requestId`)
 - GET `/audit/verify` (Bearer auth; verifies the complete retained hash chain)
 
@@ -24,21 +24,24 @@
 
 Sensitive routes use separate `admin`, `requester`, `approver`, `signer`, and
 `auditor` roles. Administrators can access all protected routes. Approval
-creation requires `requester`; approval state changes require `approver` so a
-requester credential alone cannot approve its own request. Signing and attestation challenges require
+creation requires `requester`; approval state changes require `approver`.
+Approval records store requester and approver `principalId` values. Assign the
+same stable principal ID to all credentials held by the same human or service;
+the API rejects approval when those IDs match, including separately issued
+requester and approver credentials. Signing and attestation challenges require
 `signer`; audit and read-only key status require `auditor`; key initialization
 and lifecycle changes require `admin`. A signer credential is restricted to
 the participant ID embedded in its credential record.
 
 Configure `API_AUTH_TOKENS` as a JSON array. The API stores only a SHA-256 hash
-of each 32-byte-or-longer random secret. The client bearer value is
+of each 32-byte random secret (43-character base64url encoding). The client bearer value is
 `<credential-id>.<secret>`; never put the raw bearer value in this JSON. Generate
 a credential with:
 
 ```bash
 node scripts/generate-api-credential.mjs ops-admin admin
-node scripts/generate-api-credential.mjs request-a requester
-node scripts/generate-api-credential.mjs approver-a approver
+node scripts/generate-api-credential.mjs request-a requester - trader-17
+node scripts/generate-api-credential.mjs approver-a approver - trader-17
 node scripts/generate-api-credential.mjs signer-p1 signer p1
 node scripts/generate-api-credential.mjs audit-reader auditor
 ```
@@ -61,7 +64,26 @@ Role map:
 | `POST /approval/:id/:state` | `approver` |
 | `POST /attestation/challenge`, `POST /sign/nitro`, `POST /sign/mpc` | `signer` scoped to the request participant |
 | `GET /audit`, `GET /audit/verify`, `GET /key/status` | `auditor` |
+| `GET /metrics` | `auditor` |
 | `POST /key/init`, `POST /key/:state` | `admin` |
+
+Each credential record must include a stable `principalId`. The generator uses
+the credential ID by default; pass the same principal ID explicitly for every
+role credential belonging to one operator. Principal IDs are configuration
+claims and must be managed by the organization; they are not an external
+identity-provider assertion.
+
+## Rate limits
+
+Public market reads are limited to 60–120 requests per source IP per minute;
+route rechecks and simulation endpoints use lower limits. Approval writes are
+limited to 20/minute, signing and attestation challenge requests to 10–20/minute,
+key lifecycle writes to 5–10/minute, and audit/metrics reads to 10–60/minute.
+Counters are shared through Redis across API instances. Exceeded requests return
+`429 RATE_LIMITED` with `Retry-After`. If Redis is unavailable, limited routes
+fail closed with `503 RATE_LIMIT_STORAGE_UNAVAILABLE`. Limits use the socket
+peer address; configure trusted network-level limits at the ingress for
+deployments behind a proxy.
 
 ## Nitro signing contract
 
