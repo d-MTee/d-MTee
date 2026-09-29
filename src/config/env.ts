@@ -7,6 +7,8 @@ const schema = z.object({
   SOLANA_CLUSTER_ID: z.enum(["solana-devnet", "solana-testnet", "solana-mainnet-beta"]).default("solana-devnet"),
   SOLANA_EXPECTED_GENESIS_HASH: z.string().default(""),
   ENABLE_LIVE_SUBMISSION: z.string().default("false"),
+  ENABLE_DISTRIBUTED_FROST_MAINNET: z.string().default("false"),
+  FROST_EXPECTED_WALLET: z.string().default(""),
   JUPITER_QUOTE_URL: z.string().default("https://api.jup.ag/swap/v1/quote"),
   JUPITER_API_KEY: z.string().optional(),
   DRY_RUN: z.string().default("true"),

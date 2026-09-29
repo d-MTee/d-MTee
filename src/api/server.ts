@@ -37,6 +37,7 @@ import { rateLimit } from "../security/rate-limit.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
 import { assembleApprovedTransaction, submitApprovedTransaction, transactionStatus } from "../execution/submit.js";
 import { prepareJupiterTransaction } from "../execution/jupiter-build.js";
+import { distributedFrostSign } from "../security/frost-coordinator.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -53,7 +54,7 @@ function normalizeError(error: unknown, fallback = "internal server error") {
   return String(error ?? fallback);
 }
 
-async function verifySigningRequest(body: Record<string, any>) {
+async function verifySigningRequest(body: Record<string, any>, options = { verifyAttestation: true, requireNitroWallet: true, requireNitroKeyEpoch: true }) {
   const participantId = String(body.participantId ?? "");
   if (!isParticipantAuthorized(participantId)) throw new Error("UNAUTHORIZED_PARTICIPANT");
   if (typeof body.requestId !== "string" || body.requestId.length < 16 || body.requestId.length > 128) throw new Error("INVALID_REQUEST_ID");
@@ -69,15 +70,20 @@ async function verifySigningRequest(body: Record<string, any>) {
   const messageHash = crypto.createHash("sha256").update(message).digest("hex");
   if (typeof body.transactionMessageHash !== "string" || body.transactionMessageHash !== messageHash) throw new Error("TRANSACTION_MESSAGE_HASH_MISMATCH");
   verifyPolicyAuthorization(body, messageHash);
-  if (NitroSigner.getExpectedWallet() !== body.walletId) throw new Error("SIGNING_WALLET_MISMATCH");
+  if (options.requireNitroWallet && NitroSigner.getExpectedWallet() !== body.walletId) throw new Error("SIGNING_WALLET_MISMATCH");
 
-  let attestation;
-  try { attestation = await verifyAttestationDocument(body.attestationDocument, body.challengeId, participantId, body.requestId); }
-  catch (error) { attestationRejected.inc(); runtimePolicyRejected.inc(); await audit("security.attestation.rejected", { participantId, reason: normalizeError(error) }).catch(() => {}); throw error; }
-  if (attestation.participantId !== participantId) throw new Error("ATTESTATION_PARTICIPANT_MISMATCH");
-  const lifecycle = await keyStatus();
-  if (lifecycle.state !== "ACTIVE") throw new Error("KEY_NOT_ACTIVE");
-  if (typeof body.keyId !== "string" || body.keyId !== lifecycle.keyId) throw new Error("KEY_EPOCH_MISMATCH");
+  if (options.verifyAttestation) {
+    let attestation;
+    try { attestation = await verifyAttestationDocument(body.attestationDocument, body.challengeId, participantId, body.requestId); }
+    catch (error) { attestationRejected.inc(); runtimePolicyRejected.inc(); await audit("security.attestation.rejected", { participantId, reason: normalizeError(error) }).catch(() => {}); throw error; }
+    if (attestation.participantId !== participantId) throw new Error("ATTESTATION_PARTICIPANT_MISMATCH");
+  }
+  if (typeof body.keyId !== "string" || !body.keyId) throw new Error("KEY_EPOCH_REQUIRED");
+  if (options.requireNitroKeyEpoch) {
+    const lifecycle = await keyStatus();
+    if (lifecycle.state !== "ACTIVE") throw new Error("KEY_NOT_ACTIVE");
+    if (body.keyId !== lifecycle.keyId) throw new Error("KEY_EPOCH_MISMATCH");
+  }
   const approval = await getApproval(body.approvalId);
   if (!approval.id || (approval.state !== "APPROVED" && approval.state !== "SIGNING")) throw new Error("APPROVAL_NOT_ACTIVE");
   if (approval.transactionMessageHash !== messageHash || !approval.routeHash || approval.routeHash !== body.routeHash || !approval.policyHash || approval.policyHash !== body.policyHash) throw new Error("APPROVAL_BINDING_MISMATCH");
@@ -324,7 +330,7 @@ export function createServer() {
 
   app.post("/execution/prepare", rateLimit("execution-prepare", 10, 60_000), authorize("requester"), async (req, res) => {
     try {
-      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta") throw new Error("MAINNET_REQUIRES_DISTRIBUTED_FROST");
+      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta" && (env.ENABLE_DISTRIBUTED_FROST_MAINNET !== "true" || !env.FROST_EXPECTED_WALLET)) throw new Error("MAINNET_REQUIRES_VALIDATED_DISTRIBUTED_FROST");
       const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
       const amount = Number(body.amount);
       const maxSlippageBps = Number(body.maxSlippageBps);
@@ -333,7 +339,7 @@ export function createServer() {
         outputMint: String(body.outputMint ?? ""),
         amount,
         slippageBps: maxSlippageBps,
-        wallet: NitroSigner.getExpectedWallet(),
+        wallet: env.FROST_EXPECTED_WALLET || NitroSigner.getExpectedWallet(),
       });
       const requesterPrincipalId = String(res.locals.authPrincipalId ?? "");
       const approvalId = await createApproval({
@@ -353,7 +359,7 @@ export function createServer() {
     } catch (error) {
       const reason = normalizeError(error);
       await audit("execution.prepare.rejected", { requesterPrincipalId: String(res.locals.authPrincipalId ?? ""), reason }).catch(() => {});
-      res.status(reason === "MAINNET_REQUIRES_DISTRIBUTED_FROST" ? 503 : 400).json({ error: reason });
+      res.status(reason.startsWith("MAINNET_REQUIRES_") ? 503 : 400).json({ error: reason });
     }
   });
 
@@ -390,9 +396,57 @@ export function createServer() {
   });
 
   app.post("/sign/mpc", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {
-    runtimePolicyRejected.inc();
-    await audit("signing.rejected", { scheme: "FROST-Ed25519-2-of-3", reason: "DISTRIBUTED_SIGNING_NOT_CONFIGURED" }).catch(() => {});
-    res.status(503).json({ error: "DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED", message: "Distributed DKG is available, but FROST signing rounds, participant-side policy checks, and durable key shares are not yet connected." });
+    const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
+    let claimOwner = "";
+    try {
+      const participantIds = Array.isArray(body.participantIds)
+        ? body.participantIds.map(String)
+        : [];
+      const threshold = Number(process.env.FROST_THRESHOLD ?? 2);
+      const policyAuthorizations = body.policyAuthorizations;
+      if (!Number.isSafeInteger(threshold) || threshold < 2 || participantIds.length < threshold || participantIds.length > 16 || new Set(participantIds).size !== participantIds.length) throw new Error("INVALID_SIGNER_ROSTER");
+      if (!policyAuthorizations || typeof policyAuthorizations !== "object" || Array.isArray(policyAuthorizations)) throw new Error("PARTICIPANT_POLICY_TOKENS_REQUIRED");
+      for (const participantId of participantIds) {
+        if (!isParticipantAuthorized(participantId) || typeof policyAuthorizations[participantId] !== "string") throw new Error("PARTICIPANT_POLICY_TOKEN_REQUIRED");
+      }
+      const primaryParticipant = String(body.participantId ?? "");
+      if (!participantIds.includes(primaryParticipant)) throw new Error("PRIMARY_PARTICIPANT_NOT_IN_ROSTER");
+      claimOwner = primaryParticipant;
+      const primaryBody = { ...body, policyAuthorization: policyAuthorizations[primaryParticipant] };
+      await verifySigningRequest(primaryBody, { verifyAttestation: false, requireNitroWallet: false, requireNitroKeyEpoch: false });
+      const message = transactionMessageToSign(body);
+      const messageHash = crypto.createHash("sha256").update(message).digest("hex");
+      for (const participantId of participantIds) {
+        verifyPolicyAuthorization({ ...body, participantId, policyAuthorization: policyAuthorizations[participantId] }, messageHash);
+      }
+      const signed = await distributedFrostSign({
+        requestId: String(body.requestId),
+        keyId: String(body.keyId),
+        transactionMessage: message,
+        threshold,
+        participantIds,
+        policyAuthorizations,
+        expectedWallet: String(body.walletId),
+      });
+      const assembled = assembleApprovedTransaction({
+        unsignedTransaction: body.unsignedTransaction,
+        signatureHex: signed.signature_hex,
+        expectedMessageHash: String(body.transactionMessageHash),
+        expectedWallet: String(body.walletId),
+      });
+      await setApproval(String(body.approvalId), "SIGNED", `frost:${participantIds.slice().sort().join(",")}`);
+      await audit("signing.completed", { scheme: "FROST-Ed25519", requestId: body.requestId, participants: participantIds, approvalId: body.approvalId, transactionMessageHash: signed.transaction_message_hash });
+      await audit("execution.signature_attached", { approvalId: body.approvalId, scheme: "FROST-Ed25519", transactionMessageHash: assembled.transactionMessageHash, participants: signed.participants }).catch(() => {});
+      res.json({ signature: signed.signature_hex, serializedTransaction: assembled.serializedTransaction, groupPublicKey: signed.group_public_key_hex, verified: signed.verified, participants: signed.participants, scheme: "FROST-Ed25519" });
+    } catch (error) {
+      const reason = normalizeError(error);
+      if (claimOwner && typeof body.approvalId === "string" && typeof body.requestId === "string") {
+        await releaseSigningClaim(body.approvalId, body.requestId).catch(() => false);
+      }
+      if (!reason.includes("NONCE")) runtimePolicyRejected.inc();
+      await audit("signing.rejected", { scheme: "FROST-Ed25519", reason }).catch(() => {});
+      res.status(503).json({ error: reason });
+    }
   });
 
   app.post("/sign/nitro", rateLimit("signing", 10, 60_000), authorize("signer"), async (req, res) => {
@@ -425,13 +479,13 @@ export function createServer() {
     try {
       if (env.ENABLE_LIVE_SUBMISSION !== "true") throw new Error("LIVE_SUBMISSION_DISABLED");
       if (env.DRY_RUN !== "false") throw new Error("DRY_RUN_MUST_BE_DISABLED_FOR_SUBMISSION");
-      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta") throw new Error("MAINNET_REQUIRES_DISTRIBUTED_FROST");
       const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
       const participantId = String(body.participantId ?? "");
       if (!isParticipantAuthorized(participantId)) throw new Error("UNAUTHORIZED_PARTICIPANT");
       const approvalId = String(body.approvalId ?? "");
       const approval = await getApproval(approvalId);
       if (!approval.id || (approval.state !== "SIGNED" && approval.state !== "SUBMITTING")) throw new Error("APPROVAL_NOT_SIGNED");
+      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta" && (approval.signingScheme !== "FROST-Ed25519" || env.ENABLE_DISTRIBUTED_FROST_MAINNET !== "true")) throw new Error("MAINNET_REQUIRES_VALIDATED_DISTRIBUTED_FROST");
       if (approval.chainId !== env.SOLANA_CLUSTER_ID) throw new Error("SOLANA_CLUSTER_MISMATCH");
       const expectedWallet = String(approval.walletId ?? "");
       const lastValidBlockHeight = Number(approval.lastValidBlockHeight);

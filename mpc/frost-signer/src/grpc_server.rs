@@ -19,7 +19,7 @@ use crate::mpc_proto::{
 };
 use crate::participant_runtime::{ParticipantConfig, ParticipantRuntime};
 use crate::peer_transport::{dkg_transcript_hash, PeerMailbox, PeerTransport};
-use crate::signing_policy::verify_and_claim;
+use crate::signing_policy::{mark_consumed, verify_and_claim};
 
 #[derive(Clone)]
 pub struct GrpcServer {
@@ -501,7 +501,46 @@ impl ParticipantSigner for GrpcServer {
             &request.policy_authorization,
         )
         .map_err(|error| Status::permission_denied(error))?;
-        Err(Status::unimplemented("DISTRIBUTED_SIGNING_NOT_CONFIGURED"))
+        if request.commitments.len() < usize::from(self.threshold)
+            || request.commitments.len() > usize::from(self.total_participants)
+        {
+            return Err(Status::invalid_argument("INVALID_SIGNING_PACKAGE"));
+        }
+        let mut commitments = Vec::with_capacity(request.commitments.len());
+        for item in &request.commitments {
+            let index = item
+                .participant_id
+                .strip_prefix('p')
+                .and_then(|value| value.parse::<u16>().ok())
+                .filter(|value| *value > 0 && *value <= self.total_participants)
+                .ok_or_else(|| Status::invalid_argument("INVALID_COMMITMENT_PARTICIPANT"))?;
+            commitments.push((index, item.commitment.clone()));
+        }
+        if !request
+            .commitments
+            .iter()
+            .any(|item| item.participant_id == self.participant_id)
+        {
+            return Err(Status::invalid_argument("LOCAL_COMMITMENT_REQUIRED"));
+        }
+        let share = self
+            .runtime
+            .lock()
+            .await
+            .sign_round2(&request.session_id, &request.message, commitments)
+            .map_err(|_| Status::failed_precondition("SIGNING_ROUND2_FAILED"))?;
+        mark_consumed(
+            &self.participant_id,
+            &request.key_id,
+            &request.policy_authorization,
+        )
+        .map_err(|_| Status::failed_precondition("SIGNING_NONCE_CONSUMPTION_FAILED"))?;
+        Ok(Response::new(SignRound2Response {
+            ok: true,
+            session_id: request.session_id,
+            participant_id: self.participant_id.clone(),
+            signature_share: share,
+        }))
     }
 
     async fn get_session_status(

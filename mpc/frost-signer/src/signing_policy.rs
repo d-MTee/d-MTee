@@ -123,11 +123,16 @@ pub fn verify_and_claim(
     let identity_hash = hex::encode(Sha256::digest(
         format!("{participant_id}:{key_id}").as_bytes(),
     ));
+    cleanup_expired_nonce_claims(&directory, &identity_hash, now_ms);
     let file = directory.join(format!("nonce-{identity_hash}-{nonce_hash}"));
+    if file.with_extension("used").exists() {
+        return Err("SIGNING_POLICY_NONCE_REPLAYED".into());
+    }
     let claim_record = format!(
-        "{}\n{}\n",
+        "{}\n{}\n{}\npending\n",
         request_id,
-        hex::encode(Sha256::digest(token.as_bytes()))
+        hex::encode(Sha256::digest(token.as_bytes())),
+        claims.expires_at,
     );
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -155,4 +160,86 @@ pub fn verify_and_claim(
         Err(_) => return Err("SIGNING_NONCE_STORE_UNAVAILABLE".into()),
     }
     Ok(())
+}
+
+/// Permanently mark a nonce consumed once the participant emitted its share.
+pub fn mark_consumed(participant_id: &str, key_id: &str, token: &str) -> Result<(), String> {
+    let (payload_part, _) = token.split_once('.').ok_or("POLICY_TOKEN_INVALID")?;
+    let payload = URL_SAFE_NO_PAD
+        .decode(payload_part)
+        .map_err(|_| "POLICY_TOKEN_INVALID")?;
+    let claims: Claims = serde_json::from_slice(&payload).map_err(|_| "POLICY_CLAIMS_INVALID")?;
+    if claims.participant_id != participant_id || claims.key_id != key_id {
+        return Err("POLICY_AUTHORIZATION_BINDING_MISMATCH".into());
+    }
+    let directory = PathBuf::from(
+        std::env::var("MPC_SIGNING_NONCE_DIR").map_err(|_| "SIGNING_NONCE_STORE_NOT_CONFIGURED")?,
+    );
+    let identity_hash = hex::encode(Sha256::digest(
+        format!("{participant_id}:{key_id}").as_bytes(),
+    ));
+    let nonce_hash = hex::encode(Sha256::digest(claims.nonce.as_bytes()));
+    let claim_file = directory.join(format!("nonce-{identity_hash}-{nonce_hash}"));
+    let expected = format!(
+        "{}\n{}\n{}\npending\n",
+        claims.request_id,
+        hex::encode(Sha256::digest(token.as_bytes())),
+        claims.expires_at,
+    );
+    let existing = fs::read_to_string(&claim_file).map_err(|_| "SIGNING_NONCE_CLAIM_MISSING")?;
+    if existing
+        == format!(
+            "{}\n{}\n{}\nconsumed\n",
+            claims.request_id,
+            hex::encode(Sha256::digest(token.as_bytes())),
+            claims.expires_at,
+        )
+    {
+        return Ok(());
+    }
+    if existing != expected {
+        return Err("SIGNING_POLICY_NONCE_REPLAYED".into());
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut used = options
+        .open(claim_file.with_extension("used"))
+        .map_err(|_| "SIGNING_POLICY_NONCE_REPLAYED")?;
+    used.write_all(b"consumed\n")
+        .and_then(|_| used.sync_all())
+        .map_err(|_| "SIGNING_NONCE_STORE_UNAVAILABLE")?;
+    fs::File::open(&directory)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| "SIGNING_NONCE_STORE_UNAVAILABLE")?;
+    Ok(())
+}
+
+fn cleanup_expired_nonce_claims(directory: &std::path::Path, identity_hash: &str, now_ms: u64) {
+    let prefix = format!("nonce-{identity_hash}-");
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".used"))
+        {
+            continue;
+        }
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let expires_at = contents
+            .lines()
+            .nth(2)
+            .and_then(|value| value.parse::<u64>().ok());
+        if expires_at.is_some_and(|expires_at| expires_at < now_ms) {
+            let _ = fs::remove_file(path.with_extension("used"));
+            let _ = fs::remove_file(path);
+        }
+    }
 }

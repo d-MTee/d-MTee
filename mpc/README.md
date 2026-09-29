@@ -25,8 +25,20 @@ certificate and accepts direct DKG package and transcript traffic. Outbound
 connections trust a peer-specific pinned CA and TLS server name. DKG round-one,
 round-two, and finalization handlers are wired to the participant-local FROST
 state machine. Every peer must agree on the complete transcript and group
-public-key package before key activation. Signing RPCs remain `UNIMPLEMENTED`,
-so this is not yet a distributed signing or production custody system.
+public-key package before key activation. SignRound1 and SignRound2 now run
+participant-local FROST operations. Every participant verifies its own signed
+policy token and persists the one-use nonce before returning a commitment or
+share. The Rust coordinator collects public commitments and signature shares,
+checks all selected participants returned the same public-key package, then
+aggregates and verifies the group signature. The TypeScript `/sign/mpc` route
+checks that the group key is the approved wallet and attaches the signature to
+the approved unsigned Solana transaction. `/execution/submit` remains a separate
+guarded step.
+
+This code is ready for controlled multi-host validation but has not been
+validated against three independent AWS trust domains in this development
+environment. Mainnet submission remains disabled unless the operator explicitly
+sets `ENABLE_DISTRIBUTED_FROST_MAINNET=true` after completing that validation.
 
 ## What is real in the current code
 
@@ -84,7 +96,7 @@ target AWS account before custody use.
 
 This is a genuine FROST threshold-signing implementation, not a visual placeholder or fabricated signature flow.
 
-## Target architecture after the demo phase
+## Distributed signer architecture
 
 The next meaningful evolution is a split architecture in which the Java application layer orchestrates signing requests and each Rust participant runs as an independent signer process:
 
@@ -106,7 +118,7 @@ The next meaningful evolution is a split architecture in which the Java applicat
             Signature / Verify
 ```
 
-This would produce a more honest architecture: Java agent or MCP service as the orchestration layer, Rust workers as participant signers, and the threshold signing protocol between them.
+The TypeScript API now orchestrates through the Rust coordinator process, while independent Rust workers perform participant-side signing.
 
 ## Production requirements beyond the current demo
 
@@ -163,8 +175,9 @@ filesystem with atomic exclusive file creation and fsync semantics. The same
 signed token may be retried only for that exact request; reusing its nonce for
 another request is rejected. Configure the same policy-authority public key on
 all nodes, but keep signing shares and nonce stores in their separate trust
-domains. The coordinator's Redis claim is an additional control and is not
-trusted as the participant's replay defense.
+domains. Expired nonce records are removed after their signed expiry. The
+coordinator's Redis claim is an additional control and is not trusted as the
+participant's replay defense.
 
 The server will refuse to start when any value is missing or malformed. The
 default bind address is loopback. If binding to a network interface, expose the

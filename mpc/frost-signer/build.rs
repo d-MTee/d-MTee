@@ -6,6 +6,7 @@ fn main() {
     std::env::set_var("PROTOC", &protoc);
 
     tonic_build::configure()
+        .build_client(true)
         .build_server(true)
         .compile_protos(&["../proto/mpc_service.proto"], &["../proto"])
         .expect("failed to compile MPC gRPC definitions");

@@ -1,3 +1,4 @@
+mod coordinator;
 mod grpc_server;
 mod key_store;
 mod participant_runtime;
@@ -47,11 +48,12 @@ struct DemoResult {
 
 fn print_usage() {
     eprintln!(
-        "Usage: {} [demo|participant|help] [options]
+        "Usage: {} [demo|participant|coordinate-signing|help] [options]
 
 Commands:
   demo [message]                  Run a local 2-of-3 FROST DKG and signing flow.
-  participant                     Start the mTLS participant control plane (crypto rounds remain disabled).
+  participant                     Start one mTLS FROST participant.
+  coordinate-signing              Run one-shot signing using JSON on stdin.
   help                            Show this help text.
 
 Participant options:
@@ -66,9 +68,14 @@ Notes:
   - Base64-encoded values are accepted for signed payloads.
   - Participant mode requires MPC_SERVER_CERT_PEM, MPC_SERVER_KEY_PEM,
     MPC_CLIENT_CA_PEM, MPC_COORDINATOR_CERT_SHA256, MPC_PEER_CERT_PINS_JSON,
-    and MPC_PEER_ENDPOINTS_JSON.
+    MPC_PEER_ENDPOINTS_JSON, MPC_POLICY_AUTHORITY_PUBLIC_KEY_HEX,
+    MPC_SIGNING_NONCE_DIR, MPC_KEY_STORE_DIR, and FROST_KMS_KEY_ID.
+  Coordinator mode additionally requires MPC_COORDINATOR_CERT_PEM,
+    MPC_COORDINATOR_KEY_PEM, and MPC_PEER_ENDPOINTS_JSON.
 ",
-        env::args().next().unwrap_or_else(|| "dflow-frost-signer".to_string())
+        env::args()
+            .next()
+            .unwrap_or_else(|| "dflow-frost-signer".to_string())
     );
 }
 
@@ -126,14 +133,14 @@ fn run_participant_mode(
     println!(
         "{}",
         serde_json::to_string_pretty(&ParticipantRuntimeStatus {
-            status: "mTLS-dkg-enabled-signing-disabled".to_string(),
+            status: "mTLS-distributed-signing-enabled".to_string(),
             participant_id: participant_id.clone(),
             host: host.clone(),
             port,
             threshold,
             total_participants,
             dkg_rounds_enabled: true,
-            signing_rounds_enabled: false,
+            signing_rounds_enabled: true,
         })?
     );
 
@@ -260,11 +267,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "participant" => {
             run_participant_mode(&mut args)?;
         }
+        "coordinate-signing" => {
+            tokio::runtime::Runtime::new()?.block_on(coordinator::run())?;
+        }
         "help" | "-h" | "--help" => print_usage(),
         _ => {
             print_usage();
             return Err(format!(
-                "unknown command: {command}. Expected one of: demo, participant, help"
+                "unknown command: {command}. Expected one of: demo, participant, coordinate-signing, help"
             )
             .into());
         }
