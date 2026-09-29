@@ -74,6 +74,18 @@ async function requireTrustedAttestation(
       : typeof req.headers["x-participant-id"] === "string"
         ? req.headers["x-participant-id"]
         : undefined;
+  const hostId =
+    typeof req.body?.hostId === "string"
+      ? req.body.hostId
+      : typeof req.headers["x-host-id"] === "string"
+        ? req.headers["x-host-id"]
+        : undefined;
+  const accountId =
+    typeof req.body?.accountId === "string"
+      ? req.body.accountId
+      : typeof req.headers["x-account-id"] === "string"
+        ? req.headers["x-account-id"]
+        : undefined;
 
   if (!record) {
     return res.status(403).json({
@@ -90,6 +102,8 @@ async function requireTrustedAttestation(
 
   const policy = await evaluateRuntimePolicy({
     participantId,
+    hostId,
+    accountId,
     attestation: record,
     keyState,
   });
@@ -103,7 +117,11 @@ async function requireTrustedAttestation(
           ? "The attestation record is not trusted."
           : policy.reason === "KEY_NOT_ACTIVE"
             ? "The signing key is not in an active state."
-            : "The runtime policy rejected the request.",
+            : policy.reason === "PARTICIPANT_HOST_MISMATCH"
+              ? "The participant is running on an untrusted or mismatched host."
+              : policy.reason === "PARTICIPANT_ACCOUNT_MISMATCH"
+                ? "The participant is using an unauthorized account identity."
+                : "The runtime policy rejected the request.",
     });
   }
 

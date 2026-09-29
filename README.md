@@ -189,6 +189,7 @@ Requirements:
 npm install
 npm run redis:up
 npm run check:redis
+npm run check:participant-policy
 cp .env.example .env
 docker compose up -d redis
 npm run check:redis
@@ -205,21 +206,35 @@ Before signing requests are accepted in a real deployment, verify the following 
 # 1) Redis is available
 npm run check:redis
 
-# 2) attestation is present and trusted
+# 2) participant identity is isolated by host/account
+PARTICIPANT_ID=p1 HOST_ID=host-p1 ACCOUNT_ID=account-p1 npm run check:participant-policy
+
+# 3) attestation is present and trusted
 curl -X POST http://localhost:8080/sign/mpc \
   -H 'content-type: application/json' \
-  -d '{"participantId":"p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
+  -d '{"participantId":"p1","hostId":"host-p1","accountId":"account-p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
 
-# 3) untrusted participant is rejected
+# 4) untrusted participant is rejected
 curl -X POST http://localhost:8080/sign/mpc \
   -H 'content-type: application/json' \
-  -d '{"participantId":"unknown","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
+  -d '{"participantId":"unknown","hostId":"host-p1","accountId":"account-p1","attestation":{"participantId":"p1","enclaveId":"mini-dflow-enclave","nonce":"nonce-123456","pcrs":{"PCR3":"8d8d8d","PCR8":"9e9e9e"},"signedAt":1700000000000}}'
 
-# 4) key lifecycle is enforced
+# 5) key lifecycle is enforced
 curl -X POST http://localhost:8080/key/REVOKED
 ```
 
-If Redis is unavailable, the service will still compile but the signing and audit flows will behave as if the runtime is incomplete. In a production deployment, Redis, attestation policy validation and participant binding must all be synchronized before enabling live traffic.
+If Redis is unavailable, the service will still compile but the signing and audit flows will behave as if the runtime is incomplete. In a production deployment, Redis, attestation policy validation, participant host/account binding, and key-state enforcement must all be synchronized before enabling live traffic.
+
+### Production participant isolation policy
+
+For a production deployment, each participant must be pinned to its own host and IAM/account identity:
+
+- `p1` -> `host-p1` and `account-p1`
+- `p2` -> `host-p2` and `account-p2`
+- `p3` -> `host-p3` and `account-p3`
+- `coordinator` -> `coordinator-host` and `coordinator-account`
+
+Requests that mix a participant ID with a different host or account are rejected with `PARTICIPANT_HOST_MISMATCH` or `PARTICIPANT_ACCOUNT_MISMATCH`. This keeps the runtime aligned with the architectural requirement that every signer runs in a separate trust domain.
 
 Useful endpoints:
 

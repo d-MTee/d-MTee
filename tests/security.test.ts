@@ -145,6 +145,7 @@ test("runtime policy accepts active key state and rejects non-active signing sta
 
   const allow = await evaluateRuntimePolicy({
     participantId: "p1",
+    hostId: "host-p1",
     attestation: {
       participantId: "p1",
       enclaveId: "mini-dflow-enclave",
@@ -160,6 +161,7 @@ test("runtime policy accepts active key state and rejects non-active signing sta
 
   const reject = await evaluateRuntimePolicy({
     participantId: "p1",
+    hostId: "host-p1",
     attestation: {
       participantId: "p1",
       enclaveId: "mini-dflow-enclave",
@@ -172,4 +174,20 @@ test("runtime policy accepts active key state and rejects non-active signing sta
 
   assert.equal(reject.allowed, false);
   assert.equal(reject.reason, "KEY_NOT_ACTIVE");
+
+  const hostMismatch = await evaluateRuntimePolicy({
+    participantId: "p2",
+    hostId: "host-p1",
+    attestation: {
+      participantId: "p2",
+      enclaveId: "mini-dflow-enclave",
+      nonce: "nonce-123456",
+      pcrs: { PCR3: "8d8d8d", PCR8: "9e9e9e" },
+      signedAt: Date.now(),
+    },
+    keyState: "ACTIVE",
+  });
+
+  assert.equal(hostMismatch.allowed, false);
+  assert.equal(hostMismatch.reason, "PARTICIPANT_HOST_MISMATCH");
 });
