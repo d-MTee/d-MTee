@@ -16,6 +16,7 @@
 - [x] Participant-specific peer client certificate pins and per-peer CA pins for direct DKG transport
 - [x] DKG transcript replay/equivocation rejection and all-participant public-key package agreement
 - [x] Participant-scoped KMS encryption, atomic active-epoch selection, recovery validation, and epoch rotation through a fresh DKG
+- [x] Participant-side Ed25519 policy-token verification and durable one-use policy-nonce claims before FROST commitments
 - [x] Participant-local FROST DKG/signing state machine keeps secret packages and nonces out of RPC inputs
 - [x] Approval-to-request binding and one-use request/nonces
 - [x] Atomic SHA-256 hash-linked audit stream and verification endpoint
@@ -26,7 +27,7 @@ key policy must be applied to measured PCRs before enclave signing can start.
 
 ## Requires deployment / external security work
 - [ ] Deploy and independently validate direct peer DKG across three separate trust domains
-- [ ] Independently verify policy authorization and replay state inside every signer participant
+- [ ] Deploy separate durable nonce volumes and policy-authority key configuration on every participant; validate concurrent replay rejection and disaster recovery on target hosts
 - [ ] Run and independently review encrypted FROST-share persistence, recovery, rotation, and rollback using each participant's production KMS key
 - [x] Automate KMS seed provisioning, participant-scoped ciphertext storage, and broker deployment
 - [ ] Run and independently review KMS bootstrap, rotation, rollback, and recovery on a real Nitro host

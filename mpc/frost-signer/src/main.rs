@@ -2,6 +2,7 @@ mod grpc_server;
 mod key_store;
 mod participant_runtime;
 mod peer_transport;
+mod signing_policy;
 
 pub mod mpc_proto {
     include!(concat!(env!("OUT_DIR"), "/mpc.v1.rs"));

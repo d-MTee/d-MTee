@@ -135,6 +135,10 @@ MPC_CLIENT_CA_PEM
 MPC_COORDINATOR_CERT_SHA256
 MPC_PEER_CERT_PINS_JSON
 MPC_PEER_ENDPOINTS_JSON
+MPC_POLICY_AUTHORITY_PUBLIC_KEY_HEX
+MPC_SIGNING_NONCE_DIR
+MPC_KEY_STORE_DIR
+FROST_KMS_KEY_ID
 ```
 
 `MPC_PEER_CERT_PINS_JSON` is a JSON object mapping each remote participant ID
@@ -149,6 +153,18 @@ configuration and distribute them through a secret/configuration manager.
 The ceremony deliberately requires every participant to agree. A missing or
 disagreeing peer blocks key activation instead of allowing a threshold manifest
 quorum, which would not provide safe Byzantine agreement for a 2-of-3 roster.
+
+Signing RPCs independently verify the Ed25519 `policy_authorization` token
+against `MPC_POLICY_AUTHORITY_PUBLIC_KEY_HEX`, bind its participant/request/key
+and transaction-message hash to the call, enforce its short expiry, and persist
+its one-use policy nonce under `MPC_SIGNING_NONCE_DIR` before producing a FROST
+commitment. Each participant needs its own durable local nonce directory on a
+filesystem with atomic exclusive file creation and fsync semantics. The same
+signed token may be retried only for that exact request; reusing its nonce for
+another request is rejected. Configure the same policy-authority public key on
+all nodes, but keep signing shares and nonce stores in their separate trust
+domains. The coordinator's Redis claim is an additional control and is not
+trusted as the participant's replay defense.
 
 The server will refuse to start when any value is missing or malformed. The
 default bind address is loopback. If binding to a network interface, expose the

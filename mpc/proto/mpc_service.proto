@@ -158,6 +158,9 @@ message SignRound1Request {
   string session_id = 1;
   string participant_id = 2;
   bytes message = 3;
+  string key_id = 4;
+  string request_id = 5;
+  string policy_authorization = 6;
 }
 
 message SignRound1Response {
@@ -171,6 +174,10 @@ message SignRound2Request {
   string session_id = 1;
   string participant_id = 2;
   bytes signing_package = 3;
+  string key_id = 4;
+  string request_id = 5;
+  bytes message = 6;
+  string policy_authorization = 7;
 }
 
 message SignRound2Response {

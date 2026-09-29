@@ -19,6 +19,7 @@ use crate::mpc_proto::{
 };
 use crate::participant_runtime::{ParticipantConfig, ParticipantRuntime};
 use crate::peer_transport::{dkg_transcript_hash, PeerMailbox, PeerTransport};
+use crate::signing_policy::verify_and_claim;
 
 #[derive(Clone)]
 pub struct GrpcServer {
@@ -444,15 +445,62 @@ impl ParticipantSigner for GrpcServer {
         &self,
         request: Request<SignRound1Request>,
     ) -> Result<Response<SignRound1Response>, Status> {
-        let _ = request;
-        Err(Status::unimplemented("DISTRIBUTED_SIGNING_NOT_CONFIGURED"))
+        let request = request.into_inner();
+        self.check_participant(&request.participant_id)?;
+        if request.request_id.len() < 16
+            || request.session_id != request.request_id
+            || request.message.is_empty()
+            || request.message.len() > 1232
+            || request.key_id.is_empty()
+        {
+            return Err(Status::invalid_argument("INVALID_SIGNING_REQUEST"));
+        }
+        verify_and_claim(
+            &self.participant_id,
+            &request.session_id,
+            &request.request_id,
+            &request.key_id,
+            &request.message,
+            &request.policy_authorization,
+        )
+        .map_err(|error| Status::permission_denied(error))?;
+        let commitment = self
+            .runtime
+            .lock()
+            .await
+            .sign_round1(&request.session_id, &request.key_id, &request.message)
+            .map_err(|_| Status::failed_precondition("SIGNING_ROUND1_FAILED"))?;
+        Ok(Response::new(SignRound1Response {
+            ok: true,
+            session_id: request.session_id,
+            participant_id: self.participant_id.clone(),
+            commitment,
+        }))
     }
 
     async fn sign_round2(
         &self,
         request: Request<SignRound2Request>,
     ) -> Result<Response<SignRound2Response>, Status> {
-        let _ = request;
+        let request = request.into_inner();
+        self.check_participant(&request.participant_id)?;
+        if request.request_id.len() < 16
+            || request.session_id != request.request_id
+            || request.message.is_empty()
+            || request.message.len() > 1232
+            || request.key_id.is_empty()
+        {
+            return Err(Status::invalid_argument("INVALID_SIGNING_REQUEST"));
+        }
+        verify_and_claim(
+            &self.participant_id,
+            &request.session_id,
+            &request.request_id,
+            &request.key_id,
+            &request.message,
+            &request.policy_authorization,
+        )
+        .map_err(|error| Status::permission_denied(error))?;
         Err(Status::unimplemented("DISTRIBUTED_SIGNING_NOT_CONFIGURED"))
     }
 
