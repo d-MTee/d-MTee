@@ -21,12 +21,20 @@ export function assembleApprovedTransaction(input: {
   const message = Buffer.from(tx.message.serialize());
   const messageHash = crypto.createHash("sha256").update(message).digest("hex");
   if (messageHash !== input.expectedMessageHash) throw new Error("APPROVAL_BINDING_MISMATCH");
+  if (tx.message.header.numRequiredSignatures !== 1) throw new Error("UNSUPPORTED_TRANSACTION_SIGNERS");
   let signer: PublicKey;
   try { signer = new PublicKey(input.expectedWallet); } catch { throw new Error("APPROVAL_WALLET_INVALID"); }
   const signerIndex = tx.message.staticAccountKeys.slice(0, tx.message.header.numRequiredSignatures).findIndex((key) => key.equals(signer));
   if (signerIndex < 0 || signerIndex !== 0) throw new Error("TRANSACTION_FEE_PAYER_MISMATCH");
   if (typeof input.signatureHex !== "string" || !/^[a-f0-9]{128}$/i.test(input.signatureHex)) throw new Error("SIGNATURE_INVALID");
-  tx.addSignature(signer, Buffer.from(input.signatureHex, "hex"));
+  const signature = Buffer.from(input.signatureHex, "hex");
+  const verificationKey = crypto.createPublicKey({
+    key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), signer.toBuffer()]),
+    format: "der",
+    type: "spki",
+  });
+  if (!crypto.verify(null, message, verificationKey, signature)) throw new Error("SIGNATURE_VERIFICATION_FAILED");
+  tx.addSignature(signer, signature);
   return {
     serializedTransaction: Buffer.from(tx.serialize()).toString("base64"),
     transactionMessageHash: messageHash,
