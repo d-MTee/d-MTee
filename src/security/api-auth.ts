@@ -58,6 +58,7 @@ export function authorize(...allowedRoles: Role[]) {
     }
     res.locals.authCredentialId = id;
     res.locals.authPrincipalId = credential.principalId;
+    res.locals.authRoles = credential.roles;
     next();
   };
 }

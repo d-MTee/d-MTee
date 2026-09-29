@@ -19,6 +19,8 @@
 - GET `/metrics` (auditor auth)
 - POST `/attestation/challenge` (Bearer auth; requires `participantId` and `requestId`)
 - GET `/audit/verify` (Bearer auth; verifies the complete retained hash chain)
+- POST `/execution/submit` (signer auth; submits an approved signed transaction)
+- GET `/execution/:approvalId` (requester/approver/auditor; reconciles submission status)
 
 ## Authorization
 
@@ -63,6 +65,8 @@ Role map:
 | `GET /approval/:id` | `requester`, `approver`, or `auditor` |
 | `POST /approval/:id/:state` | `approver` |
 | `POST /attestation/challenge`, `POST /sign/nitro`, `POST /sign/mpc` | `signer` scoped to the request participant |
+| `POST /execution/submit` | `signer` scoped to the request participant |
+| `GET /execution/:approvalId` | `requester`, `approver`, or `auditor`; record owner or auditor only |
 | `GET /audit`, `GET /audit/verify`, `GET /key/status` | `auditor` |
 | `GET /metrics` | `auditor` |
 | `POST /key/init`, `POST /key/:state` | `admin` |
@@ -84,6 +88,24 @@ Counters are shared through Redis across API instances. Exceeded requests return
 fail closed with `503 RATE_LIMIT_STORAGE_UNAVAILABLE`. Limits use the socket
 peer address; configure trusted network-level limits at the ingress for
 deployments behind a proxy.
+
+## Solana transaction submission
+
+Submission is disabled by default. To enable a devnet rollout, set
+`ENABLE_LIVE_SUBMISSION=true`, `DRY_RUN=false`, `SOLANA_CLUSTER_ID=solana-devnet`,
+and pin `SOLANA_EXPECTED_GENESIS_HASH` to the trusted RPC's `getGenesisHash`
+result. Mainnet submission is hard-disabled until the distributed FROST signing
+path is implemented and independently reviewed.
+
+The approval must bind the exact transaction message hash, wallet, cluster,
+policy, and `lastValidBlockHeight`. After the signature is issued, send the fully
+signed base64 `VersionedTransaction` to `POST /execution/submit` with a
+participant-scoped signer credential. The API verifies the message hash and fee
+payer, checks the RPC genesis hash and recent blockhash, simulates with signature
+verification, submits through the configured RPC, and records confirmation
+state. A retry must use the same signed bytes. Use `GET /execution/:approvalId`
+to reconcile an accepted transaction. This devnet integration uses the existing
+Nitro single-enclave signer. It does not make that signer an MPC deployment.
 
 ## Nitro signing contract
 

@@ -34,6 +34,8 @@ import { createAttestationChallenge, verifyAttestationDocument } from "../securi
 import { authorize } from "../security/api-auth.js";
 import { rateLimit } from "../security/rate-limit.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
+import { submitApprovedTransaction, transactionStatus } from "../execution/submit.js";
+import { PublicKey } from "@solana/web3.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -56,6 +58,7 @@ async function verifySigningRequest(body: Record<string, any>) {
   if (typeof body.requestId !== "string" || body.requestId.length < 16 || body.requestId.length > 128) throw new Error("INVALID_REQUEST_ID");
   if (typeof body.approvalId !== "string" || !body.approvalId) throw new Error("APPROVAL_REQUIRED");
   if (typeof body.chainId !== "string" || !body.chainId || typeof body.walletId !== "string" || !body.walletId) throw new Error("CHAIN_AND_WALLET_REQUIRED");
+  if (body.chainId !== env.SOLANA_CLUSTER_ID) throw new Error("SOLANA_CLUSTER_MISMATCH");
   const nonce = Number(body.nonce);
   if (!Number.isSafeInteger(nonce) || nonce <= 0) { nonceRejected.inc(); throw new Error("INVALID_NONCE"); }
   if (!Number.isSafeInteger(Number(body.maxSlippageBps)) || Number(body.maxSlippageBps) <= 0 || !Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0) throw new Error("INVALID_TRADE_FIELDS");
@@ -65,6 +68,8 @@ async function verifySigningRequest(body: Record<string, any>) {
   const messageHash = crypto.createHash("sha256").update(message).digest("hex");
   if (typeof body.transactionMessageHash !== "string" || body.transactionMessageHash !== messageHash) throw new Error("TRANSACTION_MESSAGE_HASH_MISMATCH");
   verifyPolicyAuthorization(body, messageHash);
+  const pinnedKey = env.NITRO_EXPECTED_PUBLIC_KEY_HEX.replace(/^0x/, "");
+  if (!/^[a-fA-F0-9]{64}$/.test(pinnedKey) || new PublicKey(Buffer.from(pinnedKey, "hex")).toBase58() !== body.walletId) throw new Error("SIGNING_WALLET_MISMATCH");
 
   let attestation;
   try { attestation = await verifyAttestationDocument(body.attestationDocument, body.challengeId, participantId, body.requestId); }
@@ -78,6 +83,8 @@ async function verifySigningRequest(body: Record<string, any>) {
   if (approval.transactionMessageHash !== messageHash || !approval.routeHash || approval.routeHash !== body.routeHash || !approval.policyHash || approval.policyHash !== body.policyHash) throw new Error("APPROVAL_BINDING_MISMATCH");
   if (!approval.chainId || approval.chainId !== body.chainId || !approval.walletId || approval.walletId !== body.walletId) throw new Error("APPROVAL_BINDING_MISMATCH");
   if (Number(approval.amount) !== Number(body.amount) || approval.inputToken !== body.inputToken || approval.outputToken !== body.outputToken || Number(approval.maxSlippageBps) !== Number(body.maxSlippageBps)) throw new Error("APPROVAL_BINDING_MISMATCH");
+  if (approval.lastValidBlockHeight && Number(approval.lastValidBlockHeight) !== Number(body.lastValidBlockHeight)) throw new Error("APPROVAL_BINDING_MISMATCH");
+  if (env.ENABLE_LIVE_SUBMISSION === "true" && (!Number.isSafeInteger(Number(body.lastValidBlockHeight)) || Number(body.lastValidBlockHeight) <= 0)) throw new Error("LAST_VALID_BLOCK_HEIGHT_REQUIRED");
   const ttl = String(Math.ceil(env.TX_NONCE_MAX_AGE_MS / 1000));
   const claimed = await redis.eval(
     "if redis.call('HGET', KEYS[1], 'state') ~= 'APPROVED' then return -2 end; if redis.call('EXISTS', KEYS[2]) == 1 then return -1 end; if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end; redis.call('HSET', KEYS[1], 'state', 'SIGNING', 'updatedAt', ARGV[4]); redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3]); redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3]); return 1",
@@ -127,6 +134,7 @@ function verifyPolicyAuthorization(body: Record<string, any>, messageHash: strin
     inputToken: body.inputToken,
     outputToken: body.outputToken,
     maxSlippageBps: Number(body.maxSlippageBps),
+    ...(env.ENABLE_LIVE_SUBMISSION === "true" ? { lastValidBlockHeight: Number(body.lastValidBlockHeight) } : {}),
   };
   if (Object.entries(expected).some(([key, value]) => claims[key] !== value)) throw new Error("POLICY_AUTHORIZATION_BINDING_MISMATCH");
   const now = Date.now();
@@ -245,6 +253,7 @@ export function createServer() {
   app.post("/approval", rateLimit("approval-write", 20, 60_000), authorize("requester"), async (req, res) => {
     try {
       const requesterPrincipalId = String(res.locals.authPrincipalId ?? "");
+      if (env.ENABLE_LIVE_SUBMISSION === "true" && (req.body?.chainId !== env.SOLANA_CLUSTER_ID || typeof req.body?.lastValidBlockHeight !== "number" || !Number.isSafeInteger(req.body.lastValidBlockHeight) || req.body.lastValidBlockHeight <= 0)) throw new Error("EXECUTION_EXPIRY_AND_CLUSTER_REQUIRED");
       const id = await createApproval(req.body, requesterPrincipalId);
       await audit("approval.created", { approvalId: id, requesterPrincipalId }).catch(() => {});
       res.json({ id });
@@ -265,7 +274,9 @@ export function createServer() {
   app.post("/approval/:id/:state", rateLimit("approval-write", 20, 60_000), authorize("approver"), async (req, res) => {
     try {
       const actorPrincipalId = String(res.locals.authPrincipalId ?? "");
-      const approval = await setApproval(String(req.params.id), String(req.params.state).toUpperCase() as any, actorPrincipalId);
+      const state = String(req.params.state).toUpperCase();
+      if (state !== "APPROVED" && state !== "REJECTED") throw new Error("INVALID_APPROVAL_STATE");
+      const approval = await setApproval(String(req.params.id), state, actorPrincipalId);
       await audit("approval.transitioned", { approvalId: String(req.params.id), state: approval.state, actorPrincipalId }).catch(() => {});
       res.json(approval);
     } catch (error) {
@@ -355,7 +366,7 @@ export function createServer() {
       await verifySigningRequest(body);
       const payload = transactionMessageToSign(body);
       const signature = await new NitroSigner().sign(payload, body.policyAuthorization);
-      await setApproval(body.approvalId, "EXECUTED", `nitro:${String(body.participantId)}`);
+      await setApproval(body.approvalId, "SIGNED", `nitro:${String(body.participantId)}`);
       await audit("signing.completed", { scheme: "AWS-Nitro-Enclave-Ed25519", requestId: body.requestId, participantId: body.participantId, approvalId: body.approvalId });
       res.json({
         signature,
@@ -366,6 +377,51 @@ export function createServer() {
       if (!reason.startsWith("ATTESTATION_") && !reason.includes("NONCE")) runtimePolicyRejected.inc();
       await audit("signing.rejected", { scheme: "AWS-Nitro-Enclave-Ed25519", reason: normalizeError(error) }).catch(() => {});
       res.status(503).json({ error: reason });
+    }
+  });
+
+  app.post("/execution/submit", rateLimit("execution-submit", 5, 60_000), authorize("signer"), async (req, res) => {
+    try {
+      if (env.ENABLE_LIVE_SUBMISSION !== "true") throw new Error("LIVE_SUBMISSION_DISABLED");
+      if (env.DRY_RUN !== "false") throw new Error("DRY_RUN_MUST_BE_DISABLED_FOR_SUBMISSION");
+      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta") throw new Error("MAINNET_REQUIRES_DISTRIBUTED_FROST");
+      const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
+      const participantId = String(body.participantId ?? "");
+      if (!isParticipantAuthorized(participantId)) throw new Error("UNAUTHORIZED_PARTICIPANT");
+      const approvalId = String(body.approvalId ?? "");
+      const approval = await getApproval(approvalId);
+      if (!approval.id || (approval.state !== "SIGNED" && approval.state !== "SUBMITTING")) throw new Error("APPROVAL_NOT_SIGNED");
+      if (approval.chainId !== env.SOLANA_CLUSTER_ID) throw new Error("SOLANA_CLUSTER_MISMATCH");
+      const expectedWallet = String(approval.walletId ?? "");
+      const lastValidBlockHeight = Number(approval.lastValidBlockHeight);
+      const result = await submitApprovedTransaction({
+        approvalId,
+        serializedTransaction: body.serializedTransaction,
+        expectedMessageHash: approval.transactionMessageHash,
+        expectedWallet,
+        lastValidBlockHeight,
+        actorPrincipalId: String(res.locals.authPrincipalId ?? ""),
+      });
+      await audit("execution.submitted", { approvalId, participantId, signature: result.signature, confirmed: result.confirmed, cluster: env.SOLANA_CLUSTER_ID }).catch(() => {});
+      res.status(202).json({ approvalId, ...result, cluster: env.SOLANA_CLUSTER_ID });
+    } catch (error) {
+      const reason = normalizeError(error);
+      await audit("execution.rejected", { approvalId: String(req.body?.approvalId ?? ""), reason }).catch(() => {});
+      res.status(reason === "LIVE_SUBMISSION_DISABLED" ? 503 : 400).json({ error: reason });
+    }
+  });
+
+  app.get("/execution/:approvalId", rateLimit("execution-status", 30, 60_000), authorize("requester", "approver", "auditor"), async (req, res) => {
+    try {
+      const approval = await getApproval(String(req.params.approvalId));
+      if (!approval.id) return res.status(404).json({ error: "APPROVAL_NOT_FOUND" });
+      const principalId = String(res.locals.authPrincipalId ?? "");
+      const roles = Array.isArray(res.locals.authRoles) ? res.locals.authRoles as string[] : [];
+      if (!roles.includes("admin") && !roles.includes("auditor") && principalId !== approval.requesterPrincipalId && principalId !== approval.approverPrincipalId) return res.status(403).json({ error: "FORBIDDEN" });
+      if (approval.chainId !== env.SOLANA_CLUSTER_ID) return res.status(409).json({ error: "SOLANA_CLUSTER_MISMATCH" });
+      res.json(await transactionStatus(approval));
+    } catch (error) {
+      res.status(503).json({ error: normalizeError(error) });
     }
   });
 
