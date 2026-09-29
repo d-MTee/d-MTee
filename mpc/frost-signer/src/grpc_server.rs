@@ -5,6 +5,7 @@ use tonic::service::Interceptor;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
+use crate::mpc_proto::participant_peer_server::ParticipantPeerServer;
 use crate::mpc_proto::participant_signer_server::{ParticipantSigner, ParticipantSignerServer};
 use crate::mpc_proto::{
     CreateSigningSessionRequest, CreateSigningSessionResponse, DkgRound1Request, DkgRound1Response,
@@ -13,6 +14,7 @@ use crate::mpc_proto::{
     RegisterParticipantResponse, SignRound1Request, SignRound1Response, SignRound2Request,
     SignRound2Response,
 };
+use crate::peer_transport::{PeerMailbox, PeerTransport};
 
 #[derive(Clone, Debug, Default)]
 pub struct GrpcServer {
@@ -37,12 +39,21 @@ impl GrpcServer {
         let identity = Identity::from_pem(fs::read(cert_path)?, fs::read(key_path)?);
         let client_ca = Certificate::from_pem(fs::read(ca_path)?);
         let auth = CoordinatorCertificatePin::from_env()?;
+        let peer_mailbox = PeerMailbox::from_env(&self.participant_id)?;
+        let peer_transport = PeerTransport::from_env(&self.participant_id)?;
+        if peer_mailbox.peer_ids() != peer_transport.peer_ids() {
+            return Err("peer endpoint roster and certificate pin roster differ".into());
+        }
         let tls = ServerTlsConfig::new()
             .identity(identity)
             .client_ca_root(client_ca);
         tonic::transport::Server::builder()
             .tls_config(tls)?
             .add_service(ParticipantSignerServer::with_interceptor(self, auth))
+            .add_service(ParticipantPeerServer::with_interceptor(
+                peer_mailbox.clone(),
+                peer_mailbox.tls_interceptor(),
+            ))
             .serve(addr)
             .await?;
         Ok(())

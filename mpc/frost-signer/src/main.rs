@@ -1,5 +1,6 @@
 mod grpc_server;
 mod participant_runtime;
+mod peer_transport;
 
 pub mod mpc_proto {
     include!(concat!(env!("OUT_DIR"), "/mpc.v1.rs"));
@@ -61,7 +62,8 @@ Notes:
   - Message is optional and defaults to a demo payload.
   - Base64-encoded values are accepted for signed payloads.
   - Participant mode requires MPC_SERVER_CERT_PEM, MPC_SERVER_KEY_PEM,
-    MPC_CLIENT_CA_PEM, and MPC_COORDINATOR_CERT_SHA256.
+    MPC_CLIENT_CA_PEM, MPC_COORDINATOR_CERT_SHA256, MPC_PEER_CERT_PINS_JSON,
+    and MPC_PEER_ENDPOINTS_JSON.
 ",
         env::args().next().unwrap_or_else(|| "dflow-frost-signer".to_string())
     );

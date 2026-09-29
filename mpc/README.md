@@ -19,7 +19,12 @@ main.rs
   └── signature verification executed
 ```
 
-The gRPC listener uses mutual TLS and pins the coordinator leaf certificate.
+The gRPC listener uses mutual TLS and pins the coordinator leaf certificate on
+the control service. A separate peer service pins every participant client
+certificate and accepts only DKG round-two delivery messages. Outbound peer
+connections use a peer-specific pinned CA and expected TLS server name. The
+round RPCs remain `UNIMPLEMENTED` until the DKG transcript and signer-side
+policy stages are complete.
 Every DKG/signing RPC remains explicitly `UNIMPLEMENTED`; the service does not
 claim participant readiness or return placeholder signatures. The current
 implementation is still not a distributed custody system.
@@ -85,7 +90,19 @@ MPC_SERVER_CERT_PEM
 MPC_SERVER_KEY_PEM
 MPC_CLIENT_CA_PEM
 MPC_COORDINATOR_CERT_SHA256
+MPC_PEER_CERT_PINS_JSON
+MPC_PEER_ENDPOINTS_JSON
 ```
+
+`MPC_PEER_CERT_PINS_JSON` is a JSON object mapping each remote participant ID
+to the lowercase SHA-256 of its leaf certificate in DER form, for example
+`{"p2":"<64 hex chars>","p3":"<64 hex chars>"}`. Every pin must be unique.
+`MPC_PEER_ENDPOINTS_JSON` maps those same participant IDs to HTTPS endpoint,
+certificate DNS name, the path to that participant's private CA PEM, and the
+SHA-256 of the exact CA PEM bytes, for example
+`{"p2":{"endpoint":"https://p2.internal:9001","server_name":"p2.internal","ca_pem_path":"/etc/dflow/peer-p2-ca.pem","ca_sha256":"<64 hex chars>"}}`.
+The two rosters must match exactly. Protect these files as deployment trust
+configuration and distribute them through a secret/configuration manager.
 
 The server will refuse to start when any value is missing or malformed. The
 default bind address is loopback. If binding to a network interface, expose the

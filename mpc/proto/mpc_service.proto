@@ -16,6 +16,25 @@ service ParticipantSigner {
   rpc FinalizeSession(FinalizeSessionRequest) returns (FinalizeSessionResponse);
 }
 
+// Peer traffic is served separately from coordinator control RPCs so each
+// endpoint can apply a different certificate allow-list.
+service ParticipantPeer {
+  rpc DeliverDkgRound2(DeliverDkgRound2Request) returns (DeliverDkgRound2Response);
+}
+
+message DeliverDkgRound2Request {
+  string session_id = 1;
+  string sender_id = 2;
+  string recipient_id = 3;
+  string message_id = 4;
+  bytes package = 5;
+}
+
+message DeliverDkgRound2Response {
+  bool accepted = 1;
+  string digest = 2;
+}
+
 message RegisterParticipantRequest {
   string participant_id = 1;
   string host = 2;
@@ -60,8 +79,7 @@ message DkgRound1Response {
 message DkgRound2Request {
   string session_id = 1;
   string participant_id = 2;
-  bytes round1_secret = 3;
-  repeated bytes round1_packages = 4;
+  repeated bytes round1_packages = 3;
 }
 
 message DkgRound2Response {
@@ -90,8 +108,6 @@ message SignRound2Request {
   string session_id = 1;
   string participant_id = 2;
   bytes signing_package = 3;
-  bytes nonce = 4;
-  bytes signing_key = 5;
 }
 
 message SignRound2Response {
