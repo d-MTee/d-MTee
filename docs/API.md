@@ -140,6 +140,12 @@ or caller-authored PCR values are not accepted as evidence. Signing approvals
 must store `transactionMessageHash`, `routeHash`, and `policyHash`; incomplete
 approval records are rejected.
 
+A signing attempt holds a 30-second Redis lease. A caught signer error releases
+the exact request's lease; if the API process stops unexpectedly, a later
+request can reclaim the approval after lease expiry. Each retry must use a new
+request ID, challenge, nonce, and policy authorization; an active lease blocks
+concurrent sign attempts.
+
 The enclave signs the exact decoded Solana transaction-message bytes so the
 signature is chain-valid. The API verifies their SHA-256 against the approval
 and checks route, policy, chain, wallet, key epoch, and replay metadata before

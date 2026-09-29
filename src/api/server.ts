@@ -17,6 +17,7 @@ import { audit, recentAudit, verifyAuditChain } from "../audit/audit.js";
 import {
   createApproval,
   getApproval,
+  releaseSigningClaim,
   setApproval,
 } from "../security/approval.js";
 import { initKey, keyStatus, transition } from "../security/keys.js";
@@ -78,7 +79,7 @@ async function verifySigningRequest(body: Record<string, any>) {
   if (lifecycle.state !== "ACTIVE") throw new Error("KEY_NOT_ACTIVE");
   if (typeof body.keyId !== "string" || body.keyId !== lifecycle.keyId) throw new Error("KEY_EPOCH_MISMATCH");
   const approval = await getApproval(body.approvalId);
-  if (!approval.id || approval.state !== "APPROVED") throw new Error("APPROVAL_NOT_ACTIVE");
+  if (!approval.id || (approval.state !== "APPROVED" && approval.state !== "SIGNING")) throw new Error("APPROVAL_NOT_ACTIVE");
   if (approval.transactionMessageHash !== messageHash || !approval.routeHash || approval.routeHash !== body.routeHash || !approval.policyHash || approval.policyHash !== body.policyHash) throw new Error("APPROVAL_BINDING_MISMATCH");
   if (!approval.chainId || approval.chainId !== body.chainId || !approval.walletId || approval.walletId !== body.walletId) throw new Error("APPROVAL_BINDING_MISMATCH");
   if (Number(approval.amount) !== Number(body.amount) || approval.inputToken !== body.inputToken || approval.outputToken !== body.outputToken || Number(approval.maxSlippageBps) !== Number(body.maxSlippageBps)) throw new Error("APPROVAL_BINDING_MISMATCH");
@@ -86,7 +87,7 @@ async function verifySigningRequest(body: Record<string, any>) {
   if (env.ENABLE_LIVE_SUBMISSION === "true" && (!Number.isSafeInteger(Number(body.lastValidBlockHeight)) || Number(body.lastValidBlockHeight) <= 0)) throw new Error("LAST_VALID_BLOCK_HEIGHT_REQUIRED");
   const ttl = String(Math.ceil(env.TX_NONCE_MAX_AGE_MS / 1000));
   const claimed = await redis.eval(
-    "if redis.call('HGET', KEYS[1], 'state') ~= 'APPROVED' then return -2 end; if redis.call('EXISTS', KEYS[2]) == 1 then return -1 end; if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end; redis.call('HSET', KEYS[1], 'state', 'SIGNING', 'updatedAt', ARGV[4]); redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3]); redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3]); return 1",
+    "local state = redis.call('HGET', KEYS[1], 'state'); if state == 'SIGNING' then local time = redis.call('TIME'); local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000); local lease = tonumber(redis.call('HGET', KEYS[1], 'signingLeaseUntil') or '0'); if lease > now then return -2 end; redis.call('HSET', KEYS[1], 'state', 'APPROVED'); redis.call('HDEL', KEYS[1], 'activeSigningRequestId', 'signingLeaseUntil'); state = 'APPROVED' end; if state ~= 'APPROVED' then return -2 end; if redis.call('EXISTS', KEYS[2]) == 1 then return -1 end; if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end; local time = redis.call('TIME'); local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000); redis.call('HSET', KEYS[1], 'state', 'SIGNING', 'activeSigningRequestId', ARGV[2], 'signingLeaseUntil', now + 30000, 'updatedAt', ARGV[4]); redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3]); redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3]); return 1",
     3,
     `approval:${body.approvalId}`,
     `signing:request:${body.requestId}`,
@@ -98,7 +99,7 @@ async function verifySigningRequest(body: Record<string, any>) {
   );
   if (claimed !== 1) {
     if (claimed === 0) { nonceRejected.inc(); runtimePolicyRejected.inc(); throw new Error("NONCE_REUSED_OR_STALE"); }
-    if (claimed === -2) throw new Error("APPROVAL_NOT_ACTIVE");
+    if (claimed === -2) throw new Error("APPROVAL_NOT_ACTIVE_OR_SIGNING_LEASE_ACTIVE");
     throw new Error("REQUEST_REPLAYED");
   }
 }
@@ -399,8 +400,14 @@ export function createServer() {
       const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
       await verifySigningRequest(body);
       const payload = transactionMessageToSign(body);
-      const signature = await new NitroSigner().sign(payload, body.policyAuthorization);
-      await setApproval(body.approvalId, "SIGNED", `nitro:${String(body.participantId)}`);
+      let signature: string;
+      try {
+        signature = await new NitroSigner().sign(payload, body.policyAuthorization);
+        await setApproval(body.approvalId, "SIGNED", `nitro:${String(body.participantId)}`);
+      } catch (error) {
+        await releaseSigningClaim(body.approvalId, body.requestId).catch(() => false);
+        throw error;
+      }
       await audit("signing.completed", { scheme: "AWS-Nitro-Enclave-Ed25519", requestId: body.requestId, participantId: body.participantId, approvalId: body.approvalId });
       res.json({
         signature,

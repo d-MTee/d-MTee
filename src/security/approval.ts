@@ -97,7 +97,7 @@ export async function setApproval(id: string, state: ApprovalState, actorPrincip
   };
   if (!(state in allowed)) throw new Error("INVALID_APPROVAL_STATE");
   const changed = await redis.eval(
-    "local current = redis.call('HGET', KEYS[1], 'state'); if not current then return -1 end; if ARGV[2] == 'APPROVED' then local requester = redis.call('HGET', KEYS[1], 'requesterPrincipalId'); if not requester or requester == ARGV[4] then return -2 end end; local allowed = cjson.decode(ARGV[1]); for _,v in ipairs(allowed) do if current == v then redis.call('HSET', KEYS[1], 'state', ARGV[2], 'updatedAt', ARGV[3], 'lastActorPrincipalId', ARGV[4]); if ARGV[2] == 'APPROVED' then redis.call('HSET', KEYS[1], 'approverPrincipalId', ARGV[4]) end; return 1 end end; return 0",
+    "local current = redis.call('HGET', KEYS[1], 'state'); if not current then return -1 end; if ARGV[2] == 'APPROVED' then local requester = redis.call('HGET', KEYS[1], 'requesterPrincipalId'); if not requester or requester == ARGV[4] then return -2 end end; local allowed = cjson.decode(ARGV[1]); for _,v in ipairs(allowed) do if current == v then redis.call('HSET', KEYS[1], 'state', ARGV[2], 'updatedAt', ARGV[3], 'lastActorPrincipalId', ARGV[4]); if ARGV[2] == 'APPROVED' then redis.call('HSET', KEYS[1], 'approverPrincipalId', ARGV[4]) end; if ARGV[2] == 'SIGNED' then redis.call('HDEL', KEYS[1], 'activeSigningRequestId', 'signingLeaseUntil') end; return 1 end end; return 0",
     1,
     `approval:${id}`,
     JSON.stringify(allowed[state]),
@@ -111,6 +111,18 @@ export async function setApproval(id: string, state: ApprovalState, actorPrincip
     throw new Error("INVALID_APPROVAL_TRANSITION");
   }
   return redis.hgetall(`approval:${id}`);
+}
+
+/** Release a signing claim only when its exact request still owns the lease. */
+export async function releaseSigningClaim(id: string, requestId: string) {
+  const released = await redis.eval(
+    "if redis.call('HGET', KEYS[1], 'state') ~= 'SIGNING' then return 0 end; if redis.call('HGET', KEYS[1], 'activeSigningRequestId') ~= ARGV[1] then return 0 end; redis.call('HSET', KEYS[1], 'state', 'APPROVED', 'updatedAt', ARGV[2]); redis.call('HDEL', KEYS[1], 'activeSigningRequestId', 'signingLeaseUntil'); return 1",
+    1,
+    `approval:${id}`,
+    requestId,
+    String(Date.now()),
+  );
+  return released === 1;
 }
 
 export async function getApproval(id: string) {
