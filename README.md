@@ -187,6 +187,7 @@ Requirements:
 
 ```bash
 npm install
+npm run redis:up
 npm run check:redis
 cp .env.example .env
 docker compose up -d redis

@@ -3,7 +3,9 @@ import { Redis } from "ioredis";
 import { env } from "../config/env.js";
 
 export const redis = new Redis(env.REDIS_URL, {
+  lazyConnect: true,
   maxRetriesPerRequest: 3,
+  enableOfflineQueue: true,
 });
 
 export async function setJson(key: string, value: unknown, ttlSec = 300) {

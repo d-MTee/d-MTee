@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts",
     "lint": "tsc --noEmit",
     "check:redis": "node scripts/check-redis.mjs",
+    "redis:up": "node scripts/start-redis.mjs",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },
