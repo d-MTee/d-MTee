@@ -190,6 +190,23 @@ test("runtime policy accepts active key state and rejects non-active signing sta
 
   assert.equal(hostMismatch.allowed, false);
   assert.equal(hostMismatch.reason, "PARTICIPANT_HOST_MISMATCH");
+
+  const accountMismatch = await evaluateRuntimePolicy({
+    participantId: "p1",
+    hostId: "host-p1",
+    accountId: "account-p2",
+    attestation: {
+      participantId: "p1",
+      enclaveId: "mini-dflow-enclave",
+      nonce: "nonce-123456",
+      pcrs: { PCR3: "8d8d8d", PCR8: "9e9e9e" },
+      signedAt: Date.now(),
+    },
+    keyState: "ACTIVE",
+  });
+
+  assert.equal(accountMismatch.allowed, false);
+  assert.equal(accountMismatch.reason, "PARTICIPANT_ACCOUNT_MISMATCH");
 });
 
 test("execution preflight rejects route output that drifts from quote and simulation assumptions", async () => {
