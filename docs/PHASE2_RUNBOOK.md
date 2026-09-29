@@ -11,7 +11,7 @@ Each participant must operate in a separate trust domain, with its AWS parent id
 - `p3` on `host-p3` and `account-p3`
 - `coordinator` on `coordinator-host` and `coordinator-account`
 
-The verifier binds each participant to PCR3 (parent IAM role/account) and PCR4 (parent instance); request-supplied host/account labels are ignored. Distributed FROST participant mode remains disabled until its round handlers are implemented.
+The verifier binds each participant to PCR3 (parent IAM role/account) and PCR4 (parent instance); request-supplied host/account labels are ignored. The FROST participant binary now has an mTLS-only control plane with a pinned coordinator certificate, but every DKG/signing RPC and `/sign/mpc` remains disabled until peer-to-peer round delivery and participant-side policy verification are implemented.
 
 ## Preflight commands
 

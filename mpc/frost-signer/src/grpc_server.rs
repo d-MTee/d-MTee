@@ -1,6 +1,8 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::fs;
 
+use sha2::{Digest, Sha256};
+use tonic::service::Interceptor;
+use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 use crate::mpc_proto::participant_signer_server::{ParticipantSigner, ParticipantSignerServer};
@@ -13,18 +15,10 @@ use crate::mpc_proto::{
 };
 
 #[derive(Clone, Debug, Default)]
-pub struct GrpcSessionState {
-    pub session_id: String,
-    pub phase: String,
-    pub ready: bool,
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct GrpcServer {
     pub participant_id: String,
     pub host: String,
     pub port: u16,
-    pub sessions: Arc<Mutex<HashMap<String, GrpcSessionState>>>,
 }
 
 impl GrpcServer {
@@ -33,55 +27,58 @@ impl GrpcServer {
             participant_id: participant_id.to_string(),
             host: host.to_string(),
             port,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn register_session(&self, session_id: &str) -> Result<(), String> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| "session map lock failed".to_string())?;
-        sessions.insert(
-            session_id.to_string(),
-            GrpcSessionState {
-                session_id: session_id.to_string(),
-                phase: "REGISTERED".to_string(),
-                ready: false,
-            },
-        );
+    pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+        let cert_path = std::env::var("MPC_SERVER_CERT_PEM")?;
+        let key_path = std::env::var("MPC_SERVER_KEY_PEM")?;
+        let ca_path = std::env::var("MPC_CLIENT_CA_PEM")?;
+        let identity = Identity::from_pem(fs::read(cert_path)?, fs::read(key_path)?);
+        let client_ca = Certificate::from_pem(fs::read(ca_path)?);
+        let auth = CoordinatorCertificatePin::from_env()?;
+        let tls = ServerTlsConfig::new()
+            .identity(identity)
+            .client_ca_root(client_ca);
+        tonic::transport::Server::builder()
+            .tls_config(tls)?
+            .add_service(ParticipantSignerServer::with_interceptor(self, auth))
+            .serve(addr)
+            .await?;
         Ok(())
     }
+}
 
-    pub fn update_phase(&self, session_id: &str, phase: &str, ready: bool) -> Result<(), String> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| "session map lock failed".to_string())?;
-        if let Some(state) = sessions.get_mut(session_id) {
-            state.phase = phase.to_string();
-            state.ready = ready;
-            return Ok(());
+#[derive(Clone)]
+struct CoordinatorCertificatePin([u8; 32]);
+
+impl CoordinatorCertificatePin {
+    fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        let value = std::env::var("MPC_COORDINATOR_CERT_SHA256")?;
+        if value.len() != 64 {
+            return Err("MPC_COORDINATOR_CERT_SHA256 must be 64 hex characters".into());
         }
-        Err(format!("session not found: {session_id}"))
+        let mut pin = [0u8; 32];
+        hex::decode_to_slice(value, &mut pin)?;
+        Ok(Self(pin))
     }
+}
 
-    pub fn status(&self) -> String {
-        let sessions = self.sessions.lock().unwrap();
-        format!(
-            "participant={} host={} port={} sessions={}",
-            self.participant_id,
-            self.host,
-            self.port,
-            sessions.len()
-        )
-    }
-
-    pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
-        tonic::transport::Server::builder()
-            .add_service(ParticipantSignerServer::new(self))
-            .serve(addr)
-            .await
+impl Interceptor for CoordinatorCertificatePin {
+    fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
+        let certificates = request
+            .peer_certs()
+            .ok_or_else(|| Status::unauthenticated("MUTUAL_TLS_CLIENT_CERT_REQUIRED"))?;
+        let certificate = certificates
+            .first()
+            .ok_or_else(|| Status::unauthenticated("MUTUAL_TLS_CLIENT_CERT_REQUIRED"))?;
+        let digest: [u8; 32] = Sha256::digest(certificate.as_ref()).into();
+        if digest != self.0 {
+            return Err(Status::permission_denied(
+                "COORDINATOR_CERTIFICATE_PIN_MISMATCH",
+            ));
+        }
+        Ok(request)
     }
 }
 
@@ -91,27 +88,16 @@ impl ParticipantSigner for GrpcServer {
         &self,
         request: Request<RegisterParticipantRequest>,
     ) -> Result<Response<RegisterParticipantResponse>, Status> {
-        let request = request.into_inner();
-        let session_id = format!("session-{}", request.participant_id);
-        let _ = self.register_session(&session_id);
-        Ok(Response::new(RegisterParticipantResponse {
-            ok: true,
-            status: format!("registered:{}", request.participant_id),
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn create_signing_session(
         &self,
         request: Request<CreateSigningSessionRequest>,
     ) -> Result<Response<CreateSigningSessionResponse>, Status> {
-        let request = request.into_inner();
-        self.register_session(&request.session_id)
-            .map_err(|err| Status::internal(err))?;
-        Ok(Response::new(CreateSigningSessionResponse {
-            ok: true,
-            session_id: request.session_id,
-            status: "created".to_string(),
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn dkg_round1(
@@ -150,18 +136,8 @@ impl ParticipantSigner for GrpcServer {
         &self,
         request: Request<GetSessionStatusRequest>,
     ) -> Result<Response<GetSessionStatusResponse>, Status> {
-        let request = request.into_inner();
-        let sessions = self.sessions.lock().unwrap();
-        let Some(state) = sessions.get(&request.session_id).cloned() else {
-            return Err(Status::not_found("SESSION_NOT_FOUND"));
-        };
-        Ok(Response::new(GetSessionStatusResponse {
-            session_id: request.session_id,
-            phase: state.phase,
-            ready: state.ready,
-            completed_participants: vec![],
-            error: String::new(),
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn finalize_session(
@@ -170,22 +146,5 @@ impl ParticipantSigner for GrpcServer {
     ) -> Result<Response<FinalizeSessionResponse>, Status> {
         let _ = request;
         Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn grpc_server_registers_session() {
-        let server = GrpcServer::new("p1", "127.0.0.1", 9001);
-        server.register_session("sess-1").unwrap();
-        server.update_phase("sess-1", "READY", true).unwrap();
-
-        let sessions = server.sessions.lock().unwrap();
-        let state = sessions.get("sess-1").unwrap();
-        assert_eq!(state.phase, "READY");
-        assert!(state.ready);
     }
 }

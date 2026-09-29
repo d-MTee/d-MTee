@@ -7,6 +7,33 @@ import { txSubmitted, txConfirmed, txFailed } from "../observability/metrics.js"
 const MAX_TRANSACTION_BYTES = 1232;
 const COMMITMENT = "confirmed" as const;
 
+export function assembleApprovedTransaction(input: {
+  unsignedTransaction: unknown;
+  signatureHex: unknown;
+  expectedMessageHash: string;
+  expectedWallet: string;
+}) {
+  if (typeof input.unsignedTransaction !== "string" || input.unsignedTransaction.length > 1700) throw new Error("TRANSACTION_INVALID");
+  const raw = Buffer.from(input.unsignedTransaction, "base64");
+  if (!raw.length || raw.length > MAX_TRANSACTION_BYTES || raw.toString("base64") !== input.unsignedTransaction) throw new Error("TRANSACTION_INVALID");
+  let tx: VersionedTransaction;
+  try { tx = VersionedTransaction.deserialize(raw); } catch { throw new Error("TRANSACTION_INVALID"); }
+  const message = Buffer.from(tx.message.serialize());
+  const messageHash = crypto.createHash("sha256").update(message).digest("hex");
+  if (messageHash !== input.expectedMessageHash) throw new Error("APPROVAL_BINDING_MISMATCH");
+  let signer: PublicKey;
+  try { signer = new PublicKey(input.expectedWallet); } catch { throw new Error("APPROVAL_WALLET_INVALID"); }
+  const signerIndex = tx.message.staticAccountKeys.slice(0, tx.message.header.numRequiredSignatures).findIndex((key) => key.equals(signer));
+  if (signerIndex < 0 || signerIndex !== 0) throw new Error("TRANSACTION_FEE_PAYER_MISMATCH");
+  if (typeof input.signatureHex !== "string" || !/^[a-f0-9]{128}$/i.test(input.signatureHex)) throw new Error("SIGNATURE_INVALID");
+  tx.addSignature(signer, Buffer.from(input.signatureHex, "hex"));
+  return {
+    serializedTransaction: Buffer.from(tx.serialize()).toString("base64"),
+    transactionMessageHash: messageHash,
+    walletId: signer.toBase58(),
+  };
+}
+
 function rpcConnection() {
   if (!env.SOLANA_RPC_URL.startsWith("https://")) throw new Error("SOLANA_RPC_MUST_USE_HTTPS");
   if (!/^[a-f0-9]{64}$/i.test(env.SOLANA_EXPECTED_GENESIS_HASH)) throw new Error("SOLANA_EXPECTED_GENESIS_HASH_REQUIRED");

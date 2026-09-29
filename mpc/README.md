@@ -4,7 +4,10 @@ This module is the proof-of-concept implementation for a real FROST Ed25519 thre
 
 ## Current status
 
-The current code does not yet model separate networked participants operating in different processes or trust domains. Instead, it runs the full DKG and signing flow inside one Rust process:
+The `demo` command still runs full DKG and signing in one Rust process. A
+participant-local FROST state machine now keeps DKG secrets, key packages, and
+one-use signing nonces inside its process, but those operations are not yet
+connected to the network RPC handlers:
 
 ```text
 main.rs
@@ -16,7 +19,10 @@ main.rs
   └── signature verification executed
 ```
 
-This means the implementation is a strong local validation of FROST behavior, but it is not yet a custody-grade distributed system.
+The gRPC listener uses mutual TLS and pins the coordinator leaf certificate.
+Every DKG/signing RPC remains explicitly `UNIMPLEMENTED`; the service does not
+claim participant readiness or return placeholder signatures. The current
+implementation is still not a distributed custody system.
 
 ## What is real in the current code
 
@@ -56,7 +62,8 @@ This would produce a more honest architecture: Java agent or MCP service as the 
 
 ## Production requirements beyond the current demo
 
-To move from a local protocol demo to a Custody-level production design, the following controls are required:
+To move from the local protocol demo and mTLS control-plane scaffold to a
+custody-grade distributed design, the following controls are required:
 
 - key share storage in encrypted form
 - participant separation across isolated processes or hosts
@@ -66,6 +73,23 @@ To move from a local protocol demo to a Custody-level production design, the fol
 - network transport protection for DKG and signing messages
 - HSM or TEE-backed key protection for critical share material
 - attestation and policy enforcement before secret release
+- confidential direct delivery of DKG round-two packages without exposing them to the coordinator
+- participant-authenticated broadcast consistency for DKG round one
+- independent policy-token verification and persistent replay protection at every signing participant
+- encrypted key-share persistence and key-epoch recovery/rotation
+
+The participant command requires these environment variables:
+
+```text
+MPC_SERVER_CERT_PEM
+MPC_SERVER_KEY_PEM
+MPC_CLIENT_CA_PEM
+MPC_COORDINATOR_CERT_SHA256
+```
+
+The server will refuse to start when any value is missing or malformed. The
+default bind address is loopback. If binding to a network interface, expose the
+port only to the pinned coordinator through a private network policy.
 
 ## Prerequisites
 

@@ -2,6 +2,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import crypto from "node:crypto";
+import { PublicKey } from "@solana/web3.js";
 import { env } from "../config/env.js";
 const exec = promisify(execFile);
 
@@ -15,22 +16,11 @@ export class LocalSigner implements Signer {
   }
 }
 
-/** Real FROST signer adapter. The Rust binary performs RFC 9591 DKG + 2-of-3 signing. */
+/** Explicit fail-closed adapter until independently hosted FROST participants are connected. */
 export class ThresholdSigner implements Signer {
-  constructor(
-    private readonly binary = process.env.MPC_BIN ??
-      "mpc/frost-signer/target/release/dflow-frost-signer",
-  ) {}
-  async sign(payload: Buffer) {
-    const { stdout } = await exec(
-      this.binary,
-      ["demo", payload.toString("base64")],
-      { timeout: 30_000, maxBuffer: 1024 * 1024 },
-    );
-    const result = JSON.parse(stdout);
-    if (!result.verified || !result.signature)
-      throw new Error("MPC_SIGNATURE_VERIFICATION_FAILED");
-    return result.signature;
+  constructor(_unusedDemoBinary?: string) {}
+  async sign(_payload: Buffer): Promise<string> {
+    throw new Error("DISTRIBUTED_FROST_NOT_CONFIGURED");
   }
 }
 
@@ -54,9 +44,26 @@ export class NitroSigner implements Signer {
     const expectedPublicKey = env.NITRO_EXPECTED_PUBLIC_KEY_HEX.replace(/^0x/, "").toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(expectedPublicKey) || typeof result.public_key !== "string")
       throw new Error("NITRO_EXPECTED_PUBLIC_KEY_NOT_CONFIGURED");
-    const actualPublicKey = Buffer.from(result.public_key, "base64").toString("hex");
+    const publicKeyBytes = Buffer.from(result.public_key, "base64");
+    if (publicKeyBytes.toString("base64") !== result.public_key || publicKeyBytes.length !== 32) throw new Error("NITRO_PUBLIC_KEY_INVALID");
+    const actualPublicKey = publicKeyBytes.toString("hex");
     if (actualPublicKey !== expectedPublicKey) throw new Error("NITRO_SIGNING_KEY_MISMATCH");
-    return Buffer.from(result.signature, "base64").toString("hex");
+    if (typeof result.signature !== "string") throw new Error("NITRO_SIGNATURE_INVALID");
+    const signature = Buffer.from(result.signature, "base64");
+    if (signature.length !== 64 || signature.toString("base64") !== result.signature) throw new Error("NITRO_SIGNATURE_INVALID");
+    const verificationKey = crypto.createPublicKey({
+      key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), publicKeyBytes]),
+      format: "der",
+      type: "spki",
+    });
+    if (!crypto.verify(null, payload, verificationKey, signature)) throw new Error("NITRO_SIGNATURE_VERIFICATION_FAILED");
+    return signature.toString("hex");
+  }
+
+  static getExpectedWallet(): string {
+    const rawKey = env.NITRO_EXPECTED_PUBLIC_KEY_HEX.replace(/^0x/, "");
+    if (!/^[a-f0-9]{64}$/i.test(rawKey)) throw new Error("NITRO_EXPECTED_PUBLIC_KEY_NOT_CONFIGURED");
+    return new PublicKey(Buffer.from(rawKey, "hex")).toBase58();
   }
 }
 

@@ -1,5 +1,5 @@
 mod grpc_server;
-mod http_server;
+mod participant_runtime;
 
 pub mod mpc_proto {
     include!(concat!(env!("OUT_DIR"), "/mpc.v1.rs"));
@@ -14,13 +14,11 @@ use std::collections::BTreeMap;
 use std::env;
 
 use crate::grpc_server::GrpcServer;
-use http_server::ParticipantHttpServer;
 
 const DEFAULT_DEMO_MESSAGE: &str = "mini-dflow real MPC proof";
 const DEFAULT_PARTICIPANT_ID: &str = "p1";
 const DEFAULT_PARTICIPANT_HOST: &str = "127.0.0.1";
 const DEFAULT_PARTICIPANT_PORT: u16 = 9001;
-const DEFAULT_GRPC_PORT_OFFSET: u16 = 1000;
 
 #[derive(Serialize)]
 struct ParticipantRuntimeStatus {
@@ -30,7 +28,7 @@ struct ParticipantRuntimeStatus {
     port: u16,
     threshold: u16,
     total_participants: u16,
-    ready: bool,
+    cryptographic_rounds_enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -49,21 +47,21 @@ fn print_usage() {
 
 Commands:
   demo [message]                  Run a local 2-of-3 FROST DKG and signing flow.
-  participant                     Disabled until distributed FROST rounds are implemented.
+  participant                     Start the mTLS participant control plane (crypto rounds remain disabled).
   help                            Show this help text.
 
 Participant options:
   --participant-id <id>   Identity for this signer process (default: p1)
-  --host <host>           Host or bind address (default: 127.0.0.1)
-  --port <port>           HTTP listener port (default: 9001)
-  --grpc-port <port>      gRPC listener port (default: HTTP port + 1000)
+  --host <host>           Bind address (default: 127.0.0.1)
+  --port <port>           mTLS gRPC listener port (default: 9001)
   --threshold <n>         Required signing threshold (default: 2)
   --total <n>            Total participant count (default: 3)
 
 Notes:
   - Message is optional and defaults to a demo payload.
   - Base64-encoded values are accepted for signed payloads.
-  - The participant mode represents the next step toward independent signer processes.
+  - Participant mode requires MPC_SERVER_CERT_PEM, MPC_SERVER_KEY_PEM,
+    MPC_CLIENT_CA_PEM, and MPC_COORDINATOR_CERT_SHA256.
 ",
         env::args().next().unwrap_or_else(|| "dflow-frost-signer".to_string())
     );
@@ -79,30 +77,32 @@ fn parse_message(raw: Option<String>) -> Vec<u8> {
     }
 }
 
-fn parse_optional_u16(value: Option<String>, fallback: u16) -> Result<u16, Box<dyn std::error::Error>> {
+fn parse_optional_u16(
+    value: Option<String>,
+    fallback: u16,
+) -> Result<u16, Box<dyn std::error::Error>> {
     match value {
         Some(raw) => Ok(raw.parse::<u16>()?),
         None => Ok(fallback),
     }
 }
 
-fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_participant_mode(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut participant_id = DEFAULT_PARTICIPANT_ID.to_string();
     let mut host = DEFAULT_PARTICIPANT_HOST.to_string();
     let mut port = DEFAULT_PARTICIPANT_PORT;
-    let mut grpc_port = port.saturating_add(DEFAULT_GRPC_PORT_OFFSET);
     let mut threshold = 2u16;
     let mut total_participants = 3u16;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--participant-id" => participant_id = args.next().unwrap_or_else(|| participant_id.clone()),
-            "--host" => host = args.next().unwrap_or_else(|| host.clone()),
-            "--port" => {
-                port = parse_optional_u16(args.next(), port)?;
-                grpc_port = port.saturating_add(DEFAULT_GRPC_PORT_OFFSET);
+            "--participant-id" => {
+                participant_id = args.next().unwrap_or_else(|| participant_id.clone())
             }
-            "--grpc-port" => grpc_port = parse_optional_u16(args.next(), grpc_port)?,
+            "--host" => host = args.next().unwrap_or_else(|| host.clone()),
+            "--port" | "--grpc-port" => port = parse_optional_u16(args.next(), port)?,
             "--threshold" => threshold = parse_optional_u16(args.next(), threshold)?,
             "--total" => total_participants = parse_optional_u16(args.next(), total_participants)?,
             "--help" | "-h" => {
@@ -117,46 +117,42 @@ fn run_participant_mode(args: &mut impl Iterator<Item = String>) -> Result<(), B
         }
     }
 
-    let http_server = ParticipantHttpServer::new(&participant_id, &host, port, threshold, total_participants);
-    let grpc_server = GrpcServer::new(&participant_id, &host, grpc_port);
+    let grpc_server = GrpcServer::new(&participant_id, &host, port);
     println!(
         "{}",
         serde_json::to_string_pretty(&ParticipantRuntimeStatus {
-            status: "participant-ready".to_string(),
+            status: "mTLS-control-plane-only".to_string(),
             participant_id: participant_id.clone(),
             host: host.clone(),
             port,
             threshold,
             total_participants,
-            ready: true,
+            cryptographic_rounds_enabled: false,
         })?
     );
 
-    let http_server = std::thread::spawn(move || {
-        if let Err(err) = http_server.start() {
-            eprintln!("[http] participant server failed: {err}");
-        }
-    });
-
     let runtime = tokio::runtime::Runtime::new()?;
-    let grpc_addr: std::net::SocketAddr = format!("{}:{}", host, grpc_port).parse()?;
-    runtime.block_on(async move {
-        if let Err(err) = grpc_server.serve(grpc_addr).await {
-            eprintln!("[grpc] participant server failed: {err}");
-        }
-    });
-
-    let _ = http_server.join();
+    let grpc_addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
+    runtime.block_on(grpc_server.serve(grpc_addr))?;
     Ok(())
 }
 
-fn dkg_2_of_3() -> Result<(BTreeMap<frost::Identifier, frost::keys::KeyPackage>, frost::keys::PublicKeyPackage), Box<dyn std::error::Error>> {
+fn dkg_2_of_3() -> Result<
+    (
+        BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
+        frost::keys::PublicKeyPackage,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let mut rng = OsRng;
     let n = 3u16;
     let t = 2u16;
 
     let mut r1_secret = BTreeMap::new();
-    let mut r1_recv: BTreeMap<frost::Identifier, BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package>> = BTreeMap::new();
+    let mut r1_recv: BTreeMap<
+        frost::Identifier,
+        BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package>,
+    > = BTreeMap::new();
 
     for i in 1..=n {
         let id: frost::Identifier = i.try_into()?;
@@ -171,11 +167,15 @@ fn dkg_2_of_3() -> Result<(BTreeMap<frost::Identifier, frost::keys::KeyPackage>,
     }
 
     let mut r2_secret = BTreeMap::new();
-    let mut r2_recv: BTreeMap<frost::Identifier, BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>> = BTreeMap::new();
+    let mut r2_recv: BTreeMap<
+        frost::Identifier,
+        BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>,
+    > = BTreeMap::new();
 
     for i in 1..=n {
         let id: frost::Identifier = i.try_into()?;
-        let (secret, packages) = frost::keys::dkg::part2(r1_secret.remove(&id).unwrap(), &r1_recv[&id])?;
+        let (secret, packages) =
+            frost::keys::dkg::part2(r1_secret.remove(&id).unwrap(), &r1_recv[&id])?;
         r2_secret.insert(id, secret);
         for (rid, package) in packages {
             r2_recv.entry(rid).or_default().insert(id, package);
@@ -232,12 +232,11 @@ fn sign_2_of_3(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "demo".to_string());
-    let requested_message = args.next();
 
     match command.as_str() {
         "demo" => {
             let (keys, public) = dkg_2_of_3()?;
-            let msg_bytes = parse_message(requested_message);
+            let msg_bytes = parse_message(args.next());
 
             let sig = sign_2_of_3(&keys, &public, &msg_bytes)?;
             println!(
@@ -253,13 +252,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "participant" => {
-            let _ = &mut args;
-            return Err("DISTRIBUTED_FROST_NOT_IMPLEMENTED: participant endpoints currently return placeholder round data; use demo mode only".into());
+            run_participant_mode(&mut args)?;
         }
         "help" | "-h" | "--help" => print_usage(),
         _ => {
             print_usage();
-            return Err(format!("unknown command: {command}. Expected one of: demo, participant, help").into());
+            return Err(format!(
+                "unknown command: {command}. Expected one of: demo, participant, help"
+            )
+            .into());
         }
     }
 

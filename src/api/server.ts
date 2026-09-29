@@ -34,8 +34,8 @@ import { createAttestationChallenge, verifyAttestationDocument } from "../securi
 import { authorize } from "../security/api-auth.js";
 import { rateLimit } from "../security/rate-limit.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
-import { submitApprovedTransaction, transactionStatus } from "../execution/submit.js";
-import { PublicKey } from "@solana/web3.js";
+import { assembleApprovedTransaction, submitApprovedTransaction, transactionStatus } from "../execution/submit.js";
+import { prepareJupiterTransaction } from "../execution/jupiter-build.js";
 
 const providers = [
   new SimProvider("ORCA"),
@@ -68,8 +68,7 @@ async function verifySigningRequest(body: Record<string, any>) {
   const messageHash = crypto.createHash("sha256").update(message).digest("hex");
   if (typeof body.transactionMessageHash !== "string" || body.transactionMessageHash !== messageHash) throw new Error("TRANSACTION_MESSAGE_HASH_MISMATCH");
   verifyPolicyAuthorization(body, messageHash);
-  const pinnedKey = env.NITRO_EXPECTED_PUBLIC_KEY_HEX.replace(/^0x/, "");
-  if (!/^[a-fA-F0-9]{64}$/.test(pinnedKey) || new PublicKey(Buffer.from(pinnedKey, "hex")).toBase58() !== body.walletId) throw new Error("SIGNING_WALLET_MISMATCH");
+  if (NitroSigner.getExpectedWallet() !== body.walletId) throw new Error("SIGNING_WALLET_MISMATCH");
 
   let attestation;
   try { attestation = await verifyAttestationDocument(body.attestationDocument, body.challengeId, participantId, body.requestId); }
@@ -322,6 +321,41 @@ export function createServer() {
     }
   });
 
+  app.post("/execution/prepare", rateLimit("execution-prepare", 10, 60_000), authorize("requester"), async (req, res) => {
+    try {
+      if (env.SOLANA_CLUSTER_ID === "solana-mainnet-beta") throw new Error("MAINNET_REQUIRES_DISTRIBUTED_FROST");
+      const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
+      const amount = Number(body.amount);
+      const maxSlippageBps = Number(body.maxSlippageBps);
+      const prepared = await prepareJupiterTransaction({
+        inputMint: String(body.inputMint ?? ""),
+        outputMint: String(body.outputMint ?? ""),
+        amount,
+        slippageBps: maxSlippageBps,
+        wallet: NitroSigner.getExpectedWallet(),
+      });
+      const requesterPrincipalId = String(res.locals.authPrincipalId ?? "");
+      const approvalId = await createApproval({
+        inputToken: prepared.inputMint,
+        outputToken: prepared.outputMint,
+        amount: prepared.amount,
+        maxSlippageBps: prepared.maxSlippageBps,
+        routeHash: prepared.routeHash,
+        policyHash: prepared.policyHash,
+        transactionMessageHash: prepared.transactionMessageHash,
+        chainId: prepared.chainId,
+        walletId: prepared.walletId,
+        lastValidBlockHeight: prepared.lastValidBlockHeight,
+      }, requesterPrincipalId);
+      await audit("execution.prepared", { approvalId, requesterPrincipalId, transactionMessageHash: prepared.transactionMessageHash, chainId: prepared.chainId }).catch(() => {});
+      res.status(201).json({ approvalId, ...prepared });
+    } catch (error) {
+      const reason = normalizeError(error);
+      await audit("execution.prepare.rejected", { requesterPrincipalId: String(res.locals.authPrincipalId ?? ""), reason }).catch(() => {});
+      res.status(reason === "MAINNET_REQUIRES_DISTRIBUTED_FROST" ? 503 : 400).json({ error: reason });
+    }
+  });
+
   app.get("/audit", rateLimit("audit-read", 60, 60_000), authorize("auditor"), async (_, res) => {
     try {
       res.json(await recentAudit());
@@ -408,6 +442,30 @@ export function createServer() {
       const reason = normalizeError(error);
       await audit("execution.rejected", { approvalId: String(req.body?.approvalId ?? ""), reason }).catch(() => {});
       res.status(reason === "LIVE_SUBMISSION_DISABLED" ? 503 : 400).json({ error: reason });
+    }
+  });
+
+  app.post("/execution/assemble", rateLimit("execution-assemble", 10, 60_000), authorize("signer"), async (req, res) => {
+    try {
+      const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
+      const participantId = String(body.participantId ?? "");
+      if (!isParticipantAuthorized(participantId)) throw new Error("UNAUTHORIZED_PARTICIPANT");
+      const approvalId = String(body.approvalId ?? "");
+      const approval = await getApproval(approvalId);
+      if (!approval.id || approval.state !== "SIGNED") throw new Error("APPROVAL_NOT_SIGNED");
+      if (approval.chainId !== env.SOLANA_CLUSTER_ID) throw new Error("SOLANA_CLUSTER_MISMATCH");
+      const result = assembleApprovedTransaction({
+        unsignedTransaction: body.unsignedTransaction,
+        signatureHex: body.signature,
+        expectedMessageHash: approval.transactionMessageHash,
+        expectedWallet: approval.walletId,
+      });
+      await audit("execution.signature_attached", { approvalId, participantId, transactionMessageHash: result.transactionMessageHash }).catch(() => {});
+      res.json({ approvalId, ...result });
+    } catch (error) {
+      const reason = normalizeError(error);
+      await audit("execution.assembly_rejected", { approvalId: String(req.body?.approvalId ?? ""), reason }).catch(() => {});
+      res.status(400).json({ error: reason });
     }
   });
 

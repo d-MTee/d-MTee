@@ -20,6 +20,8 @@
 - POST `/attestation/challenge` (Bearer auth; requires `participantId` and `requestId`)
 - GET `/audit/verify` (Bearer auth; verifies the complete retained hash chain)
 - POST `/execution/submit` (signer auth; submits an approved signed transaction)
+- POST `/execution/assemble` (signer auth; attaches a signer response to the approved message)
+- POST `/execution/prepare` (requester auth; builds and simulates a Jupiter v2 transaction and creates a bound pending approval)
 - GET `/execution/:approvalId` (requester/approver/auditor; reconciles submission status)
 
 ## Authorization
@@ -62,10 +64,12 @@ Role map:
 | Route | Required role |
 | --- | --- |
 | `POST /approval` | `requester` |
+| `POST /execution/prepare` | `requester` |
 | `GET /approval/:id` | `requester`, `approver`, or `auditor` |
 | `POST /approval/:id/:state` | `approver` |
 | `POST /attestation/challenge`, `POST /sign/nitro`, `POST /sign/mpc` | `signer` scoped to the request participant |
 | `POST /execution/submit` | `signer` scoped to the request participant |
+| `POST /execution/assemble` | `signer` scoped to the request participant |
 | `GET /execution/:approvalId` | `requester`, `approver`, or `auditor`; record owner or auditor only |
 | `GET /audit`, `GET /audit/verify`, `GET /key/status` | `auditor` |
 | `GET /metrics` | `auditor` |
@@ -91,6 +95,17 @@ deployments behind a proxy.
 
 ## Solana transaction submission
 
+To prepare Jupiter swap transactions, set `JUPITER_API_KEY` and call
+`POST /execution/prepare` with `inputMint`, `outputMint`, integer `amount` in
+the input token's smallest units, and `maxSlippageBps`. The API uses the
+configured Nitro public key as taker, obtains instructions from Jupiter Swap
+API v2, checks the configured RPC cluster and blockhash, simulates the unsigned
+v0 transaction, and returns its bytes and exact message hash with a new `PENDING`
+approval ID. An independent approver must approve that record. The policy
+authority then issues a short-lived token bound to those returned fields; the
+signer calls `/sign/nitro`, attaches the signature through `/execution/assemble`,
+and submits through `/execution/submit`.
+
 Submission is disabled by default. To enable a devnet rollout, set
 `ENABLE_LIVE_SUBMISSION=true`, `DRY_RUN=false`, `SOLANA_CLUSTER_ID=solana-devnet`,
 and pin `SOLANA_EXPECTED_GENESIS_HASH` to the trusted RPC's `getGenesisHash`
@@ -98,8 +113,10 @@ result. Mainnet submission is hard-disabled until the distributed FROST signing
 path is implemented and independently reviewed.
 
 The approval must bind the exact transaction message hash, wallet, cluster,
-policy, and `lastValidBlockHeight`. After the signature is issued, send the fully
-signed base64 `VersionedTransaction` to `POST /execution/submit` with a
+policy, and `lastValidBlockHeight`. After `/sign/nitro` returns the message
+signature, attach it using `POST /execution/assemble` with the unsigned base64
+`VersionedTransaction`, `approvalId`, `participantId`, and signature hex. Submit
+the returned signed transaction to `POST /execution/submit` with a
 participant-scoped signer credential. The API verifies the message hash and fee
 payer, checks the RPC genesis hash and recent blockhash, simulates with signature
 verification, submits through the configured RPC, and records confirmation
