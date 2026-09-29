@@ -87,7 +87,7 @@ test("signing endpoint rejects requests without a trusted attestation", async ()
   });
 
   assert.equal(res.status, 403);
-  const body = await res.json();
+  const body = (await res.json()) as { error?: string };
   assert.equal(body.error, "ATTESTATION_REQUIRED");
 
   await new Promise((resolve) => server.close(resolve));
@@ -134,7 +134,7 @@ test("signing endpoint rejects untrusted participant even with a valid attestati
   });
 
   assert.equal(res.status, 403);
-  const body = await res.json();
+  const body = (await res.json()) as { error?: string };
   assert.equal(body.error, "UNAUTHORIZED_PARTICIPANT");
 
   await new Promise((resolve) => server.close(resolve));

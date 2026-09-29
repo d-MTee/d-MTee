@@ -52,17 +52,19 @@ export function evaluateRouteConsistency(input: {
     reasons.push("INVALID_ROUTE_OUTPUT");
   }
 
-  if (Number.isFinite(input.quoteOutput) && (input.quoteOutput ?? 0) > 0) {
-    const delta = Math.abs(input.routeOutput - input.quoteOutput);
-    const ratio = delta / input.quoteOutput;
+  const quoteOutput = input.quoteOutput;
+  if (typeof quoteOutput === "number" && Number.isFinite(quoteOutput) && quoteOutput > 0) {
+    const delta = Math.abs(input.routeOutput - quoteOutput);
+    const ratio = delta / quoteOutput;
     if (ratio > driftLimit) {
       reasons.push("ROUTE_OUTPUT_MISMATCH");
     }
   }
 
-  if (Number.isFinite(input.simulatedOutput) && (input.simulatedOutput ?? 0) > 0) {
-    const delta = Math.abs(input.routeOutput - input.simulatedOutput);
-    const ratio = delta / Math.max(1, input.simulatedOutput);
+  const simulatedOutput = input.simulatedOutput;
+  if (typeof simulatedOutput === "number" && Number.isFinite(simulatedOutput) && simulatedOutput > 0) {
+    const delta = Math.abs(input.routeOutput - simulatedOutput);
+    const ratio = delta / Math.max(1, simulatedOutput);
     if (ratio > driftLimit * 1.35) {
       reasons.push("SIMULATION_OUTPUT_MISMATCH");
     }
@@ -72,7 +74,8 @@ export function evaluateRouteConsistency(input: {
     reasons.push("PRIORITY_FEE_TOO_HIGH");
   }
 
-  if (Number.isFinite(input.expiresAt) && Date.now() > input.expiresAt) {
+  const expiresAt = input.expiresAt;
+  if (typeof expiresAt === "number" && Number.isFinite(expiresAt) && Date.now() > expiresAt) {
     reasons.push("QUOTE_EXPIRED");
   }
 

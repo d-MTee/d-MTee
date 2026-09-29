@@ -83,7 +83,7 @@ test("api returns structured validation errors for invalid amount", async () => 
   try {
     const res = await fetch(`http://127.0.0.1:${address.port}/quote?amount=NaN`);
     assert.equal(res.status, 400);
-    const body = await res.json();
+    const body = (await res.json()) as { error?: string };
     assert.equal(body.error, "amount must be a positive number");
   } finally {
     await new Promise((resolve, reject) =>

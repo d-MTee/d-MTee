@@ -96,7 +96,8 @@ export class RouteGraph {
     const stalePenalty = freshnessMs > 5000 ? (freshnessMs - 5000) * 0.01 : 0;
     const adjustedOutput = Math.max(0, q.outAmount - feeCost - impactPenalty - latencyPenalty - stalePenalty);
 
-    let reason: Route["decision"] extends infer T ? T["reason"] : never = "best";
+    type DecisionReason = NonNullable<Route["decision"]>["reason"];
+    let reason: DecisionReason = "best";
     if (stalePenalty > 0) reason = "stale";
     else if (q.latencyMs > 50) reason = "latency";
     else if (q.feeBps > 20) reason = "fee";
