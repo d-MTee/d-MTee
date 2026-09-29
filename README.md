@@ -236,16 +236,29 @@ For a production deployment, each participant must be pinned to its own host and
 
 Requests that mix a participant ID with a different host or account are rejected with `PARTICIPANT_HOST_MISMATCH` or `PARTICIPANT_ACCOUNT_MISMATCH`. This keeps the runtime aligned with the architectural requirement that every signer runs in a separate trust domain.
 
-The runtime also respects environment-controlled safety boundaries for route drift and priority-fee limits:
+The runtime also respects environment-controlled safety boundaries for route drift, retry policy, and nonce validation:
 
 ```bash
 MAX_ROUTE_DRIFT_RATIO=0.15
 MAX_PRIORITY_FEE_LAMPORTS=10000
 RPC_TIMEOUT_MS=5000
 ENABLE_ROUTE_CONSISTENCY_GUARD=true
+QUOTE_PROVIDER_RETRY_COUNT=2
+QUOTE_PROVIDER_RETRY_DELAY_MS=150
+QUOTE_PROVIDER_CIRCUIT_BREAKER_THRESHOLD=3
+QUOTE_PROVIDER_CIRCUIT_BREAKER_RESET_MS=60000
+TX_NONCE_MAX_AGE_MS=300000
 ```
 
 These values should be tightened for production rollouts and reviewed with the attestation and execution policy before enabling live signing traffic.
+
+### Deployment runbook
+
+1. Copy `.env.example` to `.env` and fill the production values for your host and participant identities.
+2. Ensure the Redis endpoint is reachable and the participant identity matches the configured host/account allowlist.
+3. Configure at least one healthy quote provider and set the retry threshold to a low, safe value for the environment.
+4. Validate the nonce pipeline before live signing: each submitted transaction must carry a strictly increasing nonce and must not be older than the configured TTL.
+5. Keep route drift and priority-fee caps below the production thresholds before switching to live market traffic.
 
 Useful endpoints:
 

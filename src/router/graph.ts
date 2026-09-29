@@ -1,3 +1,4 @@
+import { env } from "../config/env.js";
 import type { QuoteProvider } from "../quotes/provider.js";
 import type { Route, Leg, Token } from "../core/types.js";
 
@@ -16,7 +17,7 @@ export class RouteGraph {
       return false;
     }
 
-    if (state.failures >= 3) {
+    if (state.failures >= Number(env.QUOTE_PROVIDER_CIRCUIT_BREAKER_THRESHOLD ?? 3)) {
       return false;
     }
 
@@ -25,16 +26,47 @@ export class RouteGraph {
 
   private markProviderFailure(provider: QuoteProvider) {
     const key = provider.venue;
+    const threshold = Number(env.QUOTE_PROVIDER_CIRCUIT_BREAKER_THRESHOLD ?? 3);
+    const resetMs = Number(env.QUOTE_PROVIDER_CIRCUIT_BREAKER_RESET_MS ?? 60000);
     const current = this.providerHealth.get(key) ?? { failures: 0, unhealthyUntil: 0 };
     current.failures += 1;
-    if (current.failures >= 3) {
-      current.unhealthyUntil = Date.now() + 60_000;
+    if (current.failures >= threshold) {
+      current.unhealthyUntil = Date.now() + resetMs;
     }
     this.providerHealth.set(key, current);
   }
 
   private markProviderSuccess(provider: QuoteProvider) {
     this.providerHealth.set(provider.venue, { failures: 0, unhealthyUntil: 0 });
+  }
+
+  private delay(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async quoteWithRetry(provider: QuoteProvider, input: Token, output: Token, amount: number) {
+    const retries = Math.max(1, Number(env.QUOTE_PROVIDER_RETRY_COUNT ?? 2));
+    const retryDelayMs = Math.max(0, Number(env.QUOTE_PROVIDER_RETRY_DELAY_MS ?? 150));
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const value = await provider.quote(input, output, amount);
+        if (!this.isUsableQuote(value)) {
+          throw new Error("invalid quote payload");
+        }
+        this.markProviderSuccess(provider);
+        return value;
+      } catch (error) {
+        if (attempt < retries) {
+          await this.delay(retryDelayMs * attempt);
+          continue;
+        }
+        this.markProviderFailure(provider);
+        return null;
+      }
+    }
+
+    return null;
   }
 
   private isUsableQuote(q: any): boolean {
@@ -58,20 +90,7 @@ export class RouteGraph {
     }
 
     const qs = await Promise.allSettled(
-      healthyProviders.map(async (provider) => {
-        try {
-          const value = await provider.quote(input, output, amount);
-          if (!this.isUsableQuote(value)) {
-            this.markProviderFailure(provider);
-            return null;
-          }
-          this.markProviderSuccess(provider);
-          return value;
-        } catch {
-          this.markProviderFailure(provider);
-          return null;
-        }
-      }),
+      healthyProviders.map((provider) => this.quoteWithRetry(provider, input, output, amount)),
     );
 
     const quotes = qs.flatMap((x) =>

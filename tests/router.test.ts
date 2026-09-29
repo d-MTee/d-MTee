@@ -6,6 +6,7 @@ import { RouteGraph } from "../src/router/graph.js";
 import { createServer } from "../src/api/server.js";
 import { createApproval, setApproval } from "../src/security/approval.js";
 import { evaluatePreflight } from "../src/execution/simulate.js";
+import { validateNonce, TransactionBuilder } from "../src/execution/builder.js";
 
 test("risk policy rejects excessive slippage", () => {
   const r: any = {
@@ -179,6 +180,73 @@ test("route graph marks providers unhealthy after repeated failures", async () =
   }
 
   assert.equal(graph.isProviderHealthy("SIM"), false);
+});
+
+test("route graph retries failing providers before failing over", async () => {
+  let attempts = 0;
+  const graph = new RouteGraph([
+    {
+      venue: "SIM",
+      quote: async () => {
+        attempts += 1;
+        if (attempts < 2) {
+          throw new Error("transient error");
+        }
+        return {
+          venue: "SIM",
+          inputMint: "SOL",
+          outputMint: "USDC",
+          inAmount: 1000,
+          outAmount: 1100,
+          feeBps: 6,
+          priceImpactBps: 10,
+          latencyMs: 10,
+          timestamp: Date.now(),
+        };
+      },
+    },
+    {
+      venue: "SIM",
+      quote: async () => ({
+        venue: "SIM",
+        inputMint: "SOL",
+        outputMint: "USDC",
+        inAmount: 1000,
+        outAmount: 1050,
+        feeBps: 8,
+        priceImpactBps: 12,
+        latencyMs: 12,
+        timestamp: Date.now(),
+      }),
+    },
+  ]);
+
+  const route = await graph.best("SOL", "USDC", 1000, 50);
+  assert.equal(route.expectedOutput, 1100);
+  assert.equal(attempts, 2);
+});
+
+test("transaction builder rejects reused or stale nonces", () => {
+  assert.equal(validateNonce(0).valid, false);
+  assert.equal(validateNonce(42, { previousNonce: 42 }).valid, false);
+  assert.equal(validateNonce(Date.now() - 600_000, { maxAgeMs: 600_000 }).valid, false);
+  assert.equal(validateNonce(123, { previousNonce: 122 }).valid, true);
+});
+
+test("transaction builder encodes a signed transaction payload with nonce and route context", () => {
+  const tx = new TransactionBuilder({
+    nonce: 123,
+    amount: 1000,
+    inputToken: "SOL",
+    outputToken: "USDC",
+    route: "SIM:SOL->USDC",
+    previousNonce: 122,
+  }).build();
+
+  assert.equal(tx.nonce, 123);
+  assert.equal(tx.route, "SIM:SOL->USDC");
+  assert.equal(typeof tx.id, "string");
+  assert.ok(tx.id.length > 0);
 });
 
 test("route graph penalizes stale quotes even when raw output is larger", async () => {
