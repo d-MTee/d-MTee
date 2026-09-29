@@ -164,6 +164,23 @@ test("route graph ignores invalid provider quotes and falls back to a healthy qu
   assert.equal(route.expectedOutput, 1100);
 });
 
+test("route graph marks providers unhealthy after repeated failures", async () => {
+  const graph = new RouteGraph([
+    {
+      venue: "SIM",
+      quote: async () => {
+        throw new Error("provider down");
+      },
+    },
+  ]);
+
+  for (let i = 0; i < 3; i++) {
+    await graph.best("SOL", "USDC", 1000, 50).catch(() => undefined);
+  }
+
+  assert.equal(graph.isProviderHealthy("SIM"), false);
+});
+
 test("route graph penalizes stale quotes even when raw output is larger", async () => {
   const now = Date.now();
   const graph = new RouteGraph([

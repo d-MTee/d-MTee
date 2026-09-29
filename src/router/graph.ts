@@ -2,7 +2,40 @@ import type { QuoteProvider } from "../quotes/provider.js";
 import type { Route, Leg, Token } from "../core/types.js";
 
 export class RouteGraph {
+  private providerHealth = new Map<string, { failures: number; unhealthyUntil: number }>();
+
   constructor(private providers: QuoteProvider[]) {}
+
+  isProviderHealthy(venue: string): boolean {
+    const state = this.providerHealth.get(venue);
+    if (!state) {
+      return true;
+    }
+
+    if (state.unhealthyUntil > Date.now()) {
+      return false;
+    }
+
+    if (state.failures >= 3) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private markProviderFailure(provider: QuoteProvider) {
+    const key = provider.venue;
+    const current = this.providerHealth.get(key) ?? { failures: 0, unhealthyUntil: 0 };
+    current.failures += 1;
+    if (current.failures >= 3) {
+      current.unhealthyUntil = Date.now() + 60_000;
+    }
+    this.providerHealth.set(key, current);
+  }
+
+  private markProviderSuccess(provider: QuoteProvider) {
+    this.providerHealth.set(provider.venue, { failures: 0, unhealthyUntil: 0 });
+  }
 
   private isUsableQuote(q: any): boolean {
     if (!q || typeof q !== "object") return false;
@@ -19,16 +52,34 @@ export class RouteGraph {
     amount: number,
     maxSlippageBps: number,
   ): Promise<Route> {
+    const healthyProviders = this.providers.filter((p) => this.isProviderHealthy(p.venue));
+    if (!healthyProviders.length) {
+      throw new Error("No healthy quote provider available");
+    }
+
     const qs = await Promise.allSettled(
-      this.providers.map((p) => p.quote(input, output, amount)),
+      healthyProviders.map(async (provider) => {
+        try {
+          const value = await provider.quote(input, output, amount);
+          if (!this.isUsableQuote(value)) {
+            this.markProviderFailure(provider);
+            return null;
+          }
+          this.markProviderSuccess(provider);
+          return value;
+        } catch {
+          this.markProviderFailure(provider);
+          return null;
+        }
+      }),
     );
 
     const quotes = qs.flatMap((x) =>
-      x.status === "fulfilled" && this.isUsableQuote(x.value) ? [x.value] : [],
+      x.status === "fulfilled" && x.value ? [x.value] : [],
     );
 
     if (!quotes.length) {
-      throw new Error("No quote provider available");
+      throw new Error("No healthy quote provider available");
     }
 
     const candidates = quotes.map((q) =>
