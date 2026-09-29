@@ -31,7 +31,7 @@ import {
 } from "../observability/metrics.js";
 import { NitroSigner } from "../security/signing.js";
 import { createAttestationChallenge, verifyAttestationDocument } from "../security/attestation.js";
-import { authorizeAdmin } from "../security/api-auth.js";
+import { authorize } from "../security/api-auth.js";
 import { isParticipantAuthorized } from "../security/authorization.js";
 
 const providers = [
@@ -159,7 +159,7 @@ export function createServer() {
     res.json({ ok: true, service: "mini-dflow-realworld" }),
   );
 
-  app.post("/attestation/challenge", authorizeAdmin, async (req, res) => {
+  app.post("/attestation/challenge", authorize("signer"), async (req, res) => {
     try {
       res.json(await createAttestationChallenge(String(req.body?.participantId ?? ""), String(req.body?.requestId ?? "")));
     } catch (error) {
@@ -240,7 +240,7 @@ export function createServer() {
     }
   });
 
-  app.post("/approval", authorizeAdmin, async (req, res) => {
+  app.post("/approval", authorize("requester"), async (req, res) => {
     try {
       res.json({ id: await createApproval(req.body) });
     } catch (error) {
@@ -248,7 +248,7 @@ export function createServer() {
     }
   });
 
-  app.get("/approval/:id", authorizeAdmin, async (req, res) => {
+  app.get("/approval/:id", authorize("requester", "approver", "auditor"), async (req, res) => {
     try {
       res.json(await getApproval(req.params.id));
     } catch (error) {
@@ -256,7 +256,7 @@ export function createServer() {
     }
   });
 
-  app.post("/approval/:id/:state", authorizeAdmin, async (req, res) => {
+  app.post("/approval/:id/:state", authorize("approver"), async (req, res) => {
     try {
       res.json(
         await setApproval(req.params.id, req.params.state.toUpperCase() as any),
@@ -303,7 +303,7 @@ export function createServer() {
     }
   });
 
-  app.get("/audit", authorizeAdmin, async (_, res) => {
+  app.get("/audit", authorize("auditor"), async (_, res) => {
     try {
       res.json(await recentAudit());
     } catch (error) {
@@ -311,7 +311,7 @@ export function createServer() {
     }
   });
 
-  app.get("/key/status", authorizeAdmin, async (_, res) => {
+  app.get("/key/status", authorize("auditor"), async (_, res) => {
     try {
       res.json(await keyStatus());
     } catch (error) {
@@ -319,7 +319,7 @@ export function createServer() {
     }
   });
 
-  app.post("/key/init", authorizeAdmin, async (_, res) => {
+  app.post("/key/init", authorize("admin"), async (_, res) => {
     try {
       res.json(await initKey());
     } catch (error) {
@@ -327,7 +327,7 @@ export function createServer() {
     }
   });
 
-  app.post("/key/:state", authorizeAdmin, async (req, res) => {
+  app.post("/key/:state", authorize("admin"), async (req, res) => {
     try {
       res.json(await transition(req.params.state.toUpperCase()));
     } catch (error) {
@@ -335,15 +335,15 @@ export function createServer() {
     }
   });
 
-  app.post("/sign/mpc", authorizeAdmin, async (req, res) => {
+  app.post("/sign/mpc", authorize("signer"), async (req, res) => {
     runtimePolicyRejected.inc();
     await audit("signing.rejected", { scheme: "FROST-Ed25519-2-of-3", reason: "LOCAL_MPC_DEMO_ONLY" }).catch(() => {});
     res.status(503).json({ error: "DISTRIBUTED_MPC_SIGNING_NOT_CONFIGURED", message: "The available FROST binary co-locates participants and is demo-only." });
   });
 
-  app.post("/sign/nitro", authorizeAdmin, async (req, res) => {
+  app.post("/sign/nitro", authorize("signer"), async (req, res) => {
     try {
-      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const body: Record<string, any> = req.body && typeof req.body === "object" ? req.body : {};
       await verifySigningRequest(body);
       const payload = transactionMessageToSign(body);
       const signature = await new NitroSigner().sign(payload, body.policyAuthorization);
@@ -388,7 +388,7 @@ export function createServer() {
     }
   });
 
-  app.get("/audit/verify", authorizeAdmin, async (_req, res) => {
+  app.get("/audit/verify", authorize("auditor"), async (_req, res) => {
     try { res.json(await verifyAuditChain()); }
     catch (error) { res.status(503).json({ error: normalizeError(error) }); }
   });

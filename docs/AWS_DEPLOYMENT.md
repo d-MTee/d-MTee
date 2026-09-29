@@ -33,7 +33,11 @@ Validate the deployment state and artifacts before policy installation:
 
 This should fail closed if the required stacks, artifact outputs, PCR values, or KMS configuration are not ready.
 
-### Phase 3: build the enclave artifact
+### Phase 3: provision signing key and build the enclave artifact
+
+Follow [KMS bootstrap and rotation](security/KMS_BOOTSTRAP_ROTATION.md) to
+create the encrypted signing-seed bundle first. Use its key epoch as
+`NITRO_SIGNING_KEY_ID` and select the same participant context used by CDK.
 
 Build the EIF image and capture the measurement metadata:
 
@@ -52,6 +56,9 @@ Apply the measured policy once the final deployment values are known:
 ```
 
 This step must only execute after the final parent role ARN and enclave measurement values are stable. PCR3 depends on the parent role; PCR8 depends on the EIF signing certificate. Neither should be guessed early.
+
+After policy application, install the participant-scoped ciphertext and KMS
+broker with `PARTICIPANT_ID=<id> bash deployment/install-kms-broker.sh <seed-bundle>`.
 
 ### Phase 5: publish the artifact
 

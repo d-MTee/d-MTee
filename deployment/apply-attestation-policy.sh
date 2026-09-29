@@ -48,7 +48,7 @@ cat > "$ROOT/artifacts/enclave-kms-inline-policy.json" <<EOF2
   "Version":"2012-10-17",
   "Statement":[{
     "Effect":"Allow",
-    "Action":["kms:Decrypt","kms:GenerateDataKey","kms:GenerateRandom"],
+    "Action":["kms:Decrypt"],
     "Resource":"$KEY_ARN",
     "Condition":{"StringEqualsIgnoreCase":{
       "kms:RecipientAttestation:PCR3":"$PCR3",

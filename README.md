@@ -211,7 +211,7 @@ npm run check:redis
 PARTICIPANT_ID=p1 npm run check:participant-policy
 
 # 3) Administrative operations require this bearer header
-curl -H "Authorization: Bearer $API_BEARER_TOKEN" http://localhost:8080/key/status
+curl -H "Authorization: Bearer $AUDITOR_CREDENTIAL" http://localhost:8080/key/status
 ```
 
 The checker validates configuration only; it does not prove live Nitro attestation. `/sign/mpc` is disabled because the available participant rounds are placeholders. Nitro signing additionally requires the complete approval-bound request and a fresh Nitro document; caller-supplied attestation JSON is rejected.
@@ -226,7 +226,7 @@ For a production deployment, each participant must be pinned to measured AWS ide
 
 The server compares these measured values against participant-specific allowlists. Client-provided host/account labels are not considered evidence.
 
-The runtime now requires a bearer token on approval, key administration, attestation challenge, audit, and signing endpoints. Nitro signing accepts only a signed Nitro COSE document with a pinned certificate root, a fresh one-use challenge, request-bound user data, and configured PCR3/PCR4/PCR8 measurements. Configure `API_BEARER_TOKEN`, `NITRO_TRUSTED_ROOT_SHA256`, participant PCR values, `NITRO_SIGNING_KEY_ID`, `NITRO_EXPECTED_PUBLIC_KEY_HEX`, and `POLICY_AUTHORITY_PUBLIC_KEY_HEX` before enabling Nitro signing; missing values deny requests.
+The runtime uses role-based bearer credentials (`admin`, `requester`, `approver`, `signer`, `auditor`) configured in `API_AUTH_TOKENS`; request creation is separated from approval transitions, and signer credentials are participant-scoped. See `docs/API.md` for credential generation, rotation, and revocation. Nitro signing accepts only a signed Nitro COSE document with a pinned certificate root, a fresh one-use challenge, request-bound user data, and configured PCR3/PCR4/PCR8 measurements. Configure `NITRO_TRUSTED_ROOT_SHA256`, participant PCR values, `NITRO_SIGNING_KEY_ID`, `NITRO_EXPECTED_PUBLIC_KEY_HEX`, and `POLICY_AUTHORITY_PUBLIC_KEY_HEX` before enabling Nitro signing; missing values deny requests.
 
 Nitro signing seeds are unwrapped by KMS using the attestation document's RSA recipient key. The parent-side VSock broker is in `nitro/parent/kms_key_broker.py`; it requires a KMS-encrypted 32-byte seed in `NITRO_KMS_CIPHERTEXT_BLOB` and the restrictive PCR3/PCR8 KMS policy. Install and run that broker as a managed service on the parent host before launching the EIF.
 
@@ -343,7 +343,8 @@ Change the size with CDK context:
 npx cdk deploy --all \
   -c instanceType=m5.2xlarge \
   -c enclaveCpuCount=2 \
-  -c enclaveMemoryMiB=4096
+  -c enclaveMemoryMiB=4096 \\
+  -c participantId=p1
 ```
 
 ### Step C — create EIF signing material
@@ -357,7 +358,11 @@ The signing private key is intentionally ignored by Git. In a real CI/CD system,
 
 ### Step D — build the signed EIF
 
-Run on a Linux machine with Nitro CLI available, normally the Nitro parent or a dedicated build host:
+First provision an encrypted signing-seed bundle using
+`deployment/provision-signing-seed.py`; export `NITRO_SIGNING_KEY_ID` from its
+`keyId`, and set `NITRO_PARTICIPANT_ID` and
+`NITRO_POLICY_AUTHORITY_PUBLIC_KEY_HEX`. Then build on a Linux machine with
+Docker and Nitro CLI available, normally a dedicated build host:
 
 ```bash
 ./deployment/build-eif.sh
@@ -373,6 +378,12 @@ artifacts/
 ```
 
 A signed EIF is important because PCR8 represents the EIF signing certificate.
+The API's `NITRO_EXPECTED_PUBLIC_KEY_HEX` must match the public-key pin in the
+same seed bundle. After approving measurements and applying the KMS policy,
+install the participant ciphertext and parent broker with
+`PARTICIPANT_ID=p1 bash deployment/install-kms-broker.sh <seed-bundle.json>`.
+See [KMS bootstrap and rotation](docs/security/KMS_BOOTSTRAP_ROTATION.md) for
+the complete order, rollback, and recovery details.
 
 ### Step E — bind KMS to the enclave measurement
 

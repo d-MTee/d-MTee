@@ -10,6 +10,7 @@ interface NitroStackProps extends cdk.StackProps {
   vpc: ec2.Vpc;
   artifactBucket: s3.Bucket;
   signingKey: kms.Key;
+  participantId: string;
   instanceType: string;
   enclaveCpuCount: number;
   enclaveMemoryMiB: number;
@@ -35,16 +36,13 @@ export class NitroStack extends cdk.Stack {
         },
       },
     }));
-    role.addToPolicy(
-      new iam.PolicyStatement({
-        actions: [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath",
-        ],
-        resources: ["*"],
-      }),
-    );
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(props.participantId)) {
+      throw new Error("participantId must contain 1-32 letters, digits, underscores, or hyphens");
+    }
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [`arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/mini-dflow/${props.participantId}/kms-ciphertext`],
+    }));
     const sg = new ec2.SecurityGroup(this, "ParentSecurityGroup", {
       vpc: props.vpc,
       allowAllOutbound: true,

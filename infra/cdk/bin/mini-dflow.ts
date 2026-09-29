@@ -19,6 +19,7 @@ new NitroStack(app, "MiniDflowNitro", {
   vpc: network.vpc,
   artifactBucket: artifacts.bucket,
   signingKey: kms.signingKey,
+  participantId: app.node.tryGetContext("participantId") || "p1",
   instanceType: app.node.tryGetContext("instanceType") || "m5.xlarge",
   enclaveCpuCount: Number(app.node.tryGetContext("enclaveCpuCount") || 2),
   enclaveMemoryMiB: Number(app.node.tryGetContext("enclaveMemoryMiB") || 4096),

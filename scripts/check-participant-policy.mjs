@@ -5,7 +5,7 @@ const values = {
   pcr3: process.env[`NITRO_PCR3_${participantId}`],
   pcr4: process.env[`NITRO_PCR4_${participantId}`],
   pcr8: process.env.NITRO_PCR8,
-  token: process.env.API_BEARER_TOKEN,
+  token: process.env.API_SIGNER_CREDENTIAL,
 };
 
 if (!allowed.has(participantId)) {
@@ -18,7 +18,7 @@ if (!validHex(values.root, 64)) missing.push('NITRO_TRUSTED_ROOT_SHA256 (SHA-256
 if (!validHex(values.pcr3, 96)) missing.push(`NITRO_PCR3_${participantId} (SHA-384 PCR3)`);
 if (!validHex(values.pcr4, 96)) missing.push(`NITRO_PCR4_${participantId} (SHA-384 PCR4)`);
 if (!validHex(values.pcr8, 96)) missing.push('NITRO_PCR8 (SHA-384 PCR8)');
-if (typeof values.token !== 'string' || values.token.length < 32) missing.push('API_BEARER_TOKEN (32+ characters)');
+if (typeof values.token !== 'string' || !/^[a-zA-Z0-9_-]{1,64}\.[A-Za-z0-9_-]{43}$/.test(values.token)) missing.push('API_SIGNER_CREDENTIAL (<id>.<random 32-byte base64url secret)');
 if (missing.length) {
   console.error(`Fail-closed signing policy is incomplete:\n- ${missing.join('\n- ')}`);
   process.exit(1);

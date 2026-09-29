@@ -38,7 +38,10 @@ impl GrpcServer {
     }
 
     pub fn register_session(&self, session_id: &str) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().map_err(|_| "session map lock failed".to_string())?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "session map lock failed".to_string())?;
         sessions.insert(
             session_id.to_string(),
             GrpcSessionState {
@@ -51,7 +54,10 @@ impl GrpcServer {
     }
 
     pub fn update_phase(&self, session_id: &str, phase: &str, ready: bool) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().map_err(|_| "session map lock failed".to_string())?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "session map lock failed".to_string())?;
         if let Some(state) = sessions.get_mut(session_id) {
             state.phase = phase.to_string();
             state.ready = ready;
@@ -112,63 +118,32 @@ impl ParticipantSigner for GrpcServer {
         &self,
         request: Request<DkgRound1Request>,
     ) -> Result<Response<DkgRound1Response>, Status> {
-        let request = request.into_inner();
-        self.update_phase(&request.session_id, "DKG_ROUND_1", false)
-            .map_err(|err| Status::not_found(err))?;
-        Ok(Response::new(DkgRound1Response {
-            ok: true,
-            session_id: request.session_id,
-            participant_id: request.participant_id,
-            round1_package: vec![],
-            recipient_packages: vec![],
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn dkg_round2(
         &self,
         request: Request<DkgRound2Request>,
     ) -> Result<Response<DkgRound2Response>, Status> {
-        let request = request.into_inner();
-        self.update_phase(&request.session_id, "DKG_ROUND_2", false)
-            .map_err(|err| Status::not_found(err))?;
-        Ok(Response::new(DkgRound2Response {
-            ok: true,
-            session_id: request.session_id,
-            participant_id: request.participant_id,
-            round2_package: vec![],
-            signing_key_package: vec![],
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn sign_round1(
         &self,
         request: Request<SignRound1Request>,
     ) -> Result<Response<SignRound1Response>, Status> {
-        let request = request.into_inner();
-        self.update_phase(&request.session_id, "SIGN_ROUND_1", false)
-            .map_err(|err| Status::not_found(err))?;
-        Ok(Response::new(SignRound1Response {
-            ok: true,
-            session_id: request.session_id,
-            participant_id: request.participant_id,
-            nonce: vec![],
-            commitment: vec![],
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn sign_round2(
         &self,
         request: Request<SignRound2Request>,
     ) -> Result<Response<SignRound2Response>, Status> {
-        let request = request.into_inner();
-        self.update_phase(&request.session_id, "SIGN_ROUND_2", true)
-            .map_err(|err| Status::not_found(err))?;
-        Ok(Response::new(SignRound2Response {
-            ok: true,
-            session_id: request.session_id,
-            participant_id: request.participant_id,
-            signature_share: vec![],
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 
     async fn get_session_status(
@@ -177,7 +152,9 @@ impl ParticipantSigner for GrpcServer {
     ) -> Result<Response<GetSessionStatusResponse>, Status> {
         let request = request.into_inner();
         let sessions = self.sessions.lock().unwrap();
-        let state = sessions.get(&request.session_id).cloned().unwrap_or_default();
+        let Some(state) = sessions.get(&request.session_id).cloned() else {
+            return Err(Status::not_found("SESSION_NOT_FOUND"));
+        };
         Ok(Response::new(GetSessionStatusResponse {
             session_id: request.session_id,
             phase: state.phase,
@@ -191,13 +168,8 @@ impl ParticipantSigner for GrpcServer {
         &self,
         request: Request<FinalizeSessionRequest>,
     ) -> Result<Response<FinalizeSessionResponse>, Status> {
-        let request = request.into_inner();
-        Ok(Response::new(FinalizeSessionResponse {
-            ok: true,
-            session_id: request.session_id,
-            signature_hex: "stub-signature".to_string(),
-            verified: true,
-        }))
+        let _ = request;
+        Err(Status::unimplemented("DISTRIBUTED_FROST_NOT_IMPLEMENTED"))
     }
 }
 

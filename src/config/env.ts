@@ -18,7 +18,7 @@ const schema = z.object({
   QUOTE_PROVIDER_CIRCUIT_BREAKER_THRESHOLD: z.coerce.number().default(3),
   QUOTE_PROVIDER_CIRCUIT_BREAKER_RESET_MS: z.coerce.number().default(60000),
   TX_NONCE_MAX_AGE_MS: z.coerce.number().default(300000),
-  API_BEARER_TOKEN: z.string().optional(),
+  API_AUTH_TOKENS: z.string().default("[]"),
   NITRO_TRUSTED_ROOT_SHA256: z.string().default(""),
   NITRO_PCR3_P1: z.string().default(""),
   NITRO_PCR3_P2: z.string().default(""),

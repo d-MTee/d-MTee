@@ -63,7 +63,11 @@ For the production path, the deployment should not proceed unless the preflight 
 ./deployment/verify-deployment.sh
 ./deployment/build-eif.sh
 ./deployment/apply-attestation-policy.sh ./artifacts/measurements.json
+PARTICIPANT_ID=p1 bash ./deployment/install-kms-broker.sh artifacts/p1-seed-bundle.json
 ```
+
+See [KMS bootstrap and rotation](security/KMS_BOOTSTRAP_ROTATION.md) for seed
+generation, secret custody, approval, rollback, and recovery requirements.
 
 This keeps the enclave bootstrapping and KMS authorization in a fail-closed state rather than allowing placeholder values or a mismatched parent role.
 

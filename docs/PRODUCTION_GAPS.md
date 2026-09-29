@@ -10,6 +10,8 @@
 - [x] Nitro COSE signature, pinned root, freshness, PCR3/PCR4/PCR8 and challenge verification
 - [x] KMS recipient-decrypt path for a persistent encrypted 32-byte enclave signing seed
 - [x] Bearer authorization for administrative and signing routes
+- [x] Role-based API credentials with participant-scoped signer identities and hash-only secret registry
+- [x] gRPC placeholder DKG/signing/finalize methods fail with UNIMPLEMENTED
 - [x] Approval-to-request binding and one-use request/nonces
 - [x] Atomic SHA-256 hash-linked audit stream and verification endpoint
 - [x] Provider, signing-policy, and send-outcome metric instrumentation
@@ -20,7 +22,8 @@ key policy must be applied to measured PCRs before enclave signing can start.
 ## Requires deployment / external security work
 - [ ] Implement real distributed FROST participant rounds; current participant mode and `/sign/mpc` are disabled
 - [ ] Authenticated confidential transport between MPC participants
-- [ ] Automate and independently review KMS seed provisioning, broker deployment, and key rotation
+- [x] Automate KMS seed provisioning, participant-scoped ciphertext storage, and broker deployment
+- [ ] Run and independently review KMS bootstrap, rotation, rollback, and recovery on a real Nitro host
 - [ ] External independent cryptographic/security audit of this application's integration
 - [ ] Mainnet transaction builder and venue-specific execution adapters
 - [ ] Full transaction reconciliation / retry state machine

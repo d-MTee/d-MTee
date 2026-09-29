@@ -6,6 +6,7 @@ This directory contains the production-facing security documents for the project
 
 - [THREAT_MODEL.md](./THREAT_MODEL.md): attacker model, trust boundaries, and failure modes.
 - [KEY_ROTATION.md](./KEY_ROTATION.md): participant key lifecycle, rotation, and revocation procedure.
+- [KMS_BOOTSTRAP_ROTATION.md](./KMS_BOOTSTRAP_ROTATION.md): KMS-encrypted signing-seed provisioning, broker deployment, and Nitro key rotation.
 - [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md): escalation, containment, and recovery workflow.
 
 ## Security principles
@@ -17,10 +18,15 @@ This directory contains the production-facing security documents for the project
 - deny replayed, expired, or reused nonce values
 - keep KMS access conditioned on attestation evidence
 
-All administrative and signing endpoints require `Authorization: Bearer …` with
-`API_BEARER_TOKEN` configured to a random value of at least 32 characters. Nitro
-signing also requires the root certificate fingerprint and approved per-participant
-PCR3/PCR4 plus PCR8 measurements; an unconfigured verifier denies requests.
+Protected endpoints require `Authorization: Bearer <credential-id>.<secret>`.
+`API_AUTH_TOKENS` stores per-credential SHA-256 hashes and roles (`admin`,
+`requester`, `approver`, `signer`, `auditor`); request creation is separate
+from approval transitions. Signer credentials are scoped to participant IDs.
+Rotate by deploying overlapping credential records, migrating clients,
+then removing the old ID. Revocation takes effect after the API process is
+restarted or rolled out. Nitro signing also requires the root certificate
+fingerprint and approved per-participant PCR3/PCR4 plus PCR8 measurements; an
+unconfigured verifier denies requests.
 The distributed participant server and `/sign/mpc` endpoint are disabled because
 the available participant-round implementation is still placeholder code. The
 local FROST `demo` command remains a single-process cryptographic demonstration.

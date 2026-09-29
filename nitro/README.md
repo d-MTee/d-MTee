@@ -62,30 +62,32 @@ NITRO_MEMORY=4096 NITRO_CPU_COUNT=4 ./nitro/run-enclave.sh
 ### KMS-backed persistent signing seed
 
 The enclave no longer creates a fresh signing key at every boot. Before launch,
-create a random 32-byte Ed25519 seed in a controlled key ceremony, encrypt it with
-the enclave KMS key, and store only the base64 `CiphertextBlob` on the parent
-host. Set `NITRO_KMS_CIPHERTEXT_BLOB` in a root-owned environment file for
-`nitro/parent/kms_key_broker.py`; run the broker under systemd on VSock port 5001
+create a KMS-generated random 32-byte Ed25519 seed and encrypted metadata bundle
+with `deployment/provision-signing-seed.py`. The plaintext seed is not written
+to disk; Python/SDK memory zeroization is best-effort. Store only the base64
+`CiphertextBlob` in the participant-scoped SSM SecureString by running
+`PARTICIPANT_ID=p1 bash deployment/install-kms-broker.sh <seed-bundle.json>`. The
+script installs the broker under systemd on VSock port 5001
 with an instance profile that permits `kms:Decrypt` only under the deployed
 PCR3/PCR8 recipient-attestation policy. Install the broker script as
 `/opt/mini-dflow/kms_key_broker.py`, install
 `nitro/parent/mini-dflow-kms-broker.service` into `/etc/systemd/system/`, and
 create `/etc/mini-dflow/kms-broker.env` mode `0600` containing only
 `NITRO_KMS_CIPHERTEXT_BLOB=<base64 KMS CiphertextBlob>` and `AWS_REGION=<region>`.
-Install the host's `python3-boto3` package, then enable the unit with
-`systemctl enable --now mini-dflow-kms-broker.service`. Keep the seed out of the EIF, SSM logs,
-shell history, and parent filesystem. The broker returns only KMS's
+The installer performs these host steps. Keep the seed out of the EIF, shell
+history, and parent filesystem. Only the encrypted ciphertext is stored in SSM.
+The broker returns only KMS's
 `CiphertextForRecipient`; the enclave decrypts it with the ephemeral RSA key
 whose public key is inside the signed attestation document, then zeroizes the
 plaintext buffer.
 
-Set `NITRO_SIGNING_KEY_ID` to the stable key epoch associated with that
-ciphertext and `NITRO_EXPECTED_PUBLIC_KEY_HEX` to the Ed25519 public key derived
-from the seed. The API compares the key pin and epoch with the enclave response
-and Redis lifecycle state. The enclave signs the exact approved Solana message
+Set `NITRO_SIGNING_KEY_ID` to the key epoch and `NITRO_EXPECTED_PUBLIC_KEY_HEX`
+to the Ed25519 public key in the generated metadata bundle. The API compares
+the key pin and epoch with the enclave response and Redis lifecycle state. The enclave signs the exact approved Solana message
 bytes; request metadata and the key epoch are checked by the API before signing.
-Rotation means encrypting a new seed, deploying its ciphertext and epoch, and
-updating the expected public-key pin and approval policy.
+Rotation is documented in `docs/security/KMS_BOOTSTRAP_ROTATION.md`; it provisions
+a new seed epoch, updates the PCR-bound EIF/KMS policy and SSM ciphertext, then
+rolls the API key pin and approvals.
 Obtain the public-key pin from the enclave's `identity` VSock operation after
 successful KMS seed unwrapping, for example with
 `nitro/parent/vsock_client.py identity` on the parent host.

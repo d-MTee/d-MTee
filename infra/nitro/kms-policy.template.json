@@ -12,7 +12,7 @@
       "Sid": "AllowOnlyAttestedMiniDflowEnclave",
       "Effect": "Allow",
       "Principal": { "AWS": "${PARENT_ROLE_ARN}" },
-      "Action": ["kms:Decrypt", "kms:GenerateDataKey", "kms:GenerateRandom"],
+      "Action": ["kms:Decrypt"],
       "Resource": "*",
       "Condition": {
         "StringEqualsIgnoreCase": {

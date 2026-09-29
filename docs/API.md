@@ -22,10 +22,46 @@
 
 ## Authorization
 
-`POST /approval`, `GET /approval/:id`, `POST /approval/:id/:state`, key lifecycle
-routes, audit routes, attestation challenges, and signing routes require
-`Authorization: Bearer <API_BEARER_TOKEN>`. If a 32-character-or-longer token is
-not configured, these routes return `503 API_AUTH_NOT_CONFIGURED`.
+Sensitive routes use separate `admin`, `requester`, `approver`, `signer`, and
+`auditor` roles. Administrators can access all protected routes. Approval
+creation requires `requester`; approval state changes require `approver` so a
+requester credential alone cannot approve its own request. Signing and attestation challenges require
+`signer`; audit and read-only key status require `auditor`; key initialization
+and lifecycle changes require `admin`. A signer credential is restricted to
+the participant ID embedded in its credential record.
+
+Configure `API_AUTH_TOKENS` as a JSON array. The API stores only a SHA-256 hash
+of each 32-byte-or-longer random secret. The client bearer value is
+`<credential-id>.<secret>`; never put the raw bearer value in this JSON. Generate
+a credential with:
+
+```bash
+node scripts/generate-api-credential.mjs ops-admin admin
+node scripts/generate-api-credential.mjs request-a requester
+node scripts/generate-api-credential.mjs approver-a approver
+node scripts/generate-api-credential.mjs signer-p1 signer p1
+node scripts/generate-api-credential.mjs audit-reader auditor
+```
+
+Merge each printed `credential` object into `API_AUTH_TOKENS` and deliver its
+`bearerToken` to the intended client through a secret manager. To rotate, issue
+a new ID/secret, deploy a registry containing both old and new records, migrate
+clients, then remove the old record and redeploy. To revoke, remove its record
+and restart/roll out the API. An empty or malformed registry makes protected
+requests fail closed with `503 API_AUTH_NOT_CONFIGURED`; invalid credentials
+return `401 UNAUTHORIZED` and valid credentials without the required role return
+`403 FORBIDDEN`.
+
+Role map:
+
+| Route | Required role |
+| --- | --- |
+| `POST /approval` | `requester` |
+| `GET /approval/:id` | `requester`, `approver`, or `auditor` |
+| `POST /approval/:id/:state` | `approver` |
+| `POST /attestation/challenge`, `POST /sign/nitro`, `POST /sign/mpc` | `signer` scoped to the request participant |
+| `GET /audit`, `GET /audit/verify`, `GET /key/status` | `auditor` |
+| `POST /key/init`, `POST /key/:state` | `admin` |
 
 ## Nitro signing contract
 
