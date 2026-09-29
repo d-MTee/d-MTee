@@ -45,6 +45,8 @@ export function evaluateRouteConsistency(input: {
   healthy?: boolean;
 }): PreflightDecision {
   const reasons: string[] = [];
+  const driftLimit = Number(env.MAX_ROUTE_DRIFT_RATIO ?? 0.15);
+  const feeLimit = Number(env.MAX_PRIORITY_FEE_LAMPORTS ?? 10_000);
 
   if (!Number.isFinite(input.routeOutput) || (input.routeOutput ?? 0) <= 0) {
     reasons.push("INVALID_ROUTE_OUTPUT");
@@ -53,7 +55,7 @@ export function evaluateRouteConsistency(input: {
   if (Number.isFinite(input.quoteOutput) && (input.quoteOutput ?? 0) > 0) {
     const delta = Math.abs(input.routeOutput - input.quoteOutput);
     const ratio = delta / input.quoteOutput;
-    if (ratio > 0.15) {
+    if (ratio > driftLimit) {
       reasons.push("ROUTE_OUTPUT_MISMATCH");
     }
   }
@@ -61,12 +63,12 @@ export function evaluateRouteConsistency(input: {
   if (Number.isFinite(input.simulatedOutput) && (input.simulatedOutput ?? 0) > 0) {
     const delta = Math.abs(input.routeOutput - input.simulatedOutput);
     const ratio = delta / Math.max(1, input.simulatedOutput);
-    if (ratio > 0.2) {
+    if (ratio > driftLimit * 1.35) {
       reasons.push("SIMULATION_OUTPUT_MISMATCH");
     }
   }
 
-  if (!Number.isFinite(input.priorityFeeLamports) || (input.priorityFeeLamports ?? 0) > 10_000) {
+  if (!Number.isFinite(input.priorityFeeLamports) || (input.priorityFeeLamports ?? 0) > feeLimit) {
     reasons.push("PRIORITY_FEE_TOO_HIGH");
   }
 

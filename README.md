@@ -236,6 +236,17 @@ For a production deployment, each participant must be pinned to its own host and
 
 Requests that mix a participant ID with a different host or account are rejected with `PARTICIPANT_HOST_MISMATCH` or `PARTICIPANT_ACCOUNT_MISMATCH`. This keeps the runtime aligned with the architectural requirement that every signer runs in a separate trust domain.
 
+The runtime also respects environment-controlled safety boundaries for route drift and priority-fee limits:
+
+```bash
+MAX_ROUTE_DRIFT_RATIO=0.15
+MAX_PRIORITY_FEE_LAMPORTS=10000
+RPC_TIMEOUT_MS=5000
+ENABLE_ROUTE_CONSISTENCY_GUARD=true
+```
+
+These values should be tightened for production rollouts and reviewed with the attestation and execution policy before enabling live signing traffic.
+
 Useful endpoints:
 
 ```bash

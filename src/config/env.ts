@@ -9,5 +9,9 @@ const schema = z.object({
   DRY_RUN: z.string().default("true"),
   MAX_ORDER_USD: z.coerce.number().default(10000),
   MAX_SLIPPAGE_BPS: z.coerce.number().default(100),
+  MAX_ROUTE_DRIFT_RATIO: z.coerce.number().default(0.15),
+  MAX_PRIORITY_FEE_LAMPORTS: z.coerce.number().default(10000),
+  RPC_TIMEOUT_MS: z.coerce.number().default(5000),
+  ENABLE_ROUTE_CONSISTENCY_GUARD: z.string().default("true"),
 });
 export const env = schema.parse(process.env);
