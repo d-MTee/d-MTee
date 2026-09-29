@@ -5,7 +5,11 @@ import { SimProvider } from "../quotes/simProvider.js";
 import { JupiterProvider } from "../quotes/jupiter.js";
 import { snapshot } from "../market/simulator.js";
 import { checkRoute } from "../risk/policy.js";
-import { simulateDevnet, priorityFees } from "../execution/simulate.js";
+import {
+  simulateDevnet,
+  priorityFees,
+  evaluateRouteConsistency,
+} from "../execution/simulate.js";
 import { audit, recentAudit } from "../audit/audit.js";
 import {
   createApproval,
@@ -248,6 +252,27 @@ export function createServer() {
       res.json(await priorityFees());
     } catch (error) {
       res.status(502).json({ error: normalizeError(error) });
+    }
+  });
+
+  app.post("/execution/validate", async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const decision = evaluateRouteConsistency({
+        routeOutput: Number(body.routeOutput ?? 0),
+        quoteOutput: Number(body.quoteOutput ?? 0),
+        simulatedOutput: Number(body.simulatedOutput ?? 0),
+        priorityFeeLamports: Number(body.priorityFeeLamports ?? 0),
+        expiresAt: Number(body.expiresAt ?? Date.now() + 60000),
+        healthy: body.healthy ?? true,
+      });
+      res.json({
+        allowed: decision.allowed,
+        reasons: decision.reasons,
+        validatedAt: Date.now(),
+      });
+    } catch (error) {
+      res.status(400).json({ error: normalizeError(error) });
     }
   });
 

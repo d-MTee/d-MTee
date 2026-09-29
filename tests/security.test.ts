@@ -191,3 +191,20 @@ test("runtime policy accepts active key state and rejects non-active signing sta
   assert.equal(hostMismatch.allowed, false);
   assert.equal(hostMismatch.reason, "PARTICIPANT_HOST_MISMATCH");
 });
+
+test("execution preflight rejects route output that drifts from quote and simulation assumptions", async () => {
+  const { evaluateRouteConsistency } = await import("../src/execution/simulate.js");
+
+  const result = evaluateRouteConsistency({
+    routeOutput: 1000,
+    quoteOutput: 1200,
+    simulatedOutput: 650,
+    priorityFeeLamports: 25000,
+    expiresAt: Date.now() + 1200,
+  });
+
+  assert.equal(result.allowed, false);
+  assert.ok(result.reasons.includes("ROUTE_OUTPUT_MISMATCH"));
+  assert.ok(result.reasons.includes("SIMULATION_OUTPUT_MISMATCH"));
+  assert.ok(result.reasons.includes("PRIORITY_FEE_TOO_HIGH"));
+});

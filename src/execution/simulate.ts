@@ -36,6 +36,51 @@ export function evaluatePreflight(input: {
   return { allowed: reasons.length === 0, reasons };
 }
 
+export function evaluateRouteConsistency(input: {
+  routeOutput: number;
+  quoteOutput?: number;
+  simulatedOutput?: number;
+  priorityFeeLamports?: number;
+  expiresAt?: number;
+  healthy?: boolean;
+}): PreflightDecision {
+  const reasons: string[] = [];
+
+  if (!Number.isFinite(input.routeOutput) || (input.routeOutput ?? 0) <= 0) {
+    reasons.push("INVALID_ROUTE_OUTPUT");
+  }
+
+  if (Number.isFinite(input.quoteOutput) && (input.quoteOutput ?? 0) > 0) {
+    const delta = Math.abs(input.routeOutput - input.quoteOutput);
+    const ratio = delta / input.quoteOutput;
+    if (ratio > 0.15) {
+      reasons.push("ROUTE_OUTPUT_MISMATCH");
+    }
+  }
+
+  if (Number.isFinite(input.simulatedOutput) && (input.simulatedOutput ?? 0) > 0) {
+    const delta = Math.abs(input.routeOutput - input.simulatedOutput);
+    const ratio = delta / Math.max(1, input.simulatedOutput);
+    if (ratio > 0.2) {
+      reasons.push("SIMULATION_OUTPUT_MISMATCH");
+    }
+  }
+
+  if (!Number.isFinite(input.priorityFeeLamports) || (input.priorityFeeLamports ?? 0) > 10_000) {
+    reasons.push("PRIORITY_FEE_TOO_HIGH");
+  }
+
+  if (Number.isFinite(input.expiresAt) && Date.now() > input.expiresAt) {
+    reasons.push("QUOTE_EXPIRED");
+  }
+
+  if (input.healthy === false) {
+    reasons.push("UNHEALTHY_RPC");
+  }
+
+  return { allowed: reasons.length === 0, reasons };
+}
+
 export async function simulateDevnet() {
   const c = new Connection(env.SOLANA_RPC_URL, "confirmed");
   const payer = Keypair.generate();
